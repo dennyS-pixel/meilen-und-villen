@@ -749,7 +749,7 @@ details.abschnitt>summary{min-height:44px;display:flex;align-items:center;cursor
 
 <div class="sr-only" role="status" aria-live="polite" id="ansage"></div>
 <script>
-window.MV_FASSUNG = "mv-2026-10-31-1718";
+window.MV_FASSUNG = "mv-2026-10-31-1735";
 /* ---- src/meilen.js ---- */
 /* Meilen und Villen – Amex-Punkte-Rechner (MV.meilen)
  * Besitzer: Agent "meilen". Daten aus plan/meilen-daten.json (Recherche-Stand 31.10.2026).
@@ -1863,35 +1863,36 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
     lauf.businessFlug = bzFlug;
   }
 
-  // ---------------- Flüge über Kiwi.com ----------------
-  // Öffentliche MCP-Schnittstelle von Kiwi.com: ohne Konto, ohne Schlüssel, ohne Kosten, CORS offen, braucht kein initialize.
-  var KIWI_URL = 'https://mcp.kiwi.com';
+  // ---------------- Öffentliche MCP-Schnittstellen (Kiwi.com, lastminute.com) ----------------
+  // Ohne Konto, ohne Schlüssel, ohne Kosten, CORS offen, brauchen kein initialize.
+  var KIWI_URL = 'https://mcp.kiwi.com', LM_URL = 'https://mcp.lastminute.com/mcp';
   function kiwiDatum(iso) { var m = String(iso).match(/^(\d{4})-(\d{2})-(\d{2})/); return m[3] + '/' + m[2] + '/' + m[1]; }
   function voll(n, wert) { var a = []; for (var i = 0; i < n; i++) a.push(wert); return a; }
-  async function kiwiAbruf(args, signal) {
+  function kiwiAbruf(args, signal) { return mcpAbruf(KIWI_URL, 'Kiwi.com', 'search-flight', args, signal); }
+  async function mcpAbruf(url, wer, werkzeug, args, signal) {
     var ctrl = new AbortController(), zeitUm = false;
     var t = setTimeout(function () { zeitUm = true; ctrl.abort(); }, 45000);
     var weiter = function () { ctrl.abort(); };
     if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', weiter, { once: true }); }
     var text;
     try {
-      var r = await fetch(KIWI_URL, { method: 'POST', signal: ctrl.signal, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'search-flight', arguments: args } }) });
-      if (!r.ok) throw fehler('Kiwi.com antwortet mit Fehler ' + r.status + '.', 'kiwi_' + r.status);
+      var r = await fetch(url, { method: 'POST', signal: ctrl.signal, headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: werkzeug, arguments: args } }) });
+      if (!r.ok) throw fehler(wer + ' antwortet mit Fehler ' + r.status + '.', 'mcp_' + r.status);
       text = await r.text();
     } catch (e) {
       if (e.code) throw e;
       if (signal && signal.aborted) throw fehler('Suche abgebrochen.', 'abgebrochen');
-      throw fehler(zeitUm ? 'Kiwi.com hat nicht rechtzeitig geantwortet.' : 'Keine Verbindung zu Kiwi.com.', zeitUm ? 'zeit' : 'offline');
+      throw fehler(zeitUm ? wer + ' hat nicht rechtzeitig geantwortet.' : 'Keine Verbindung zu ' + wer + '.', zeitUm ? 'zeit' : 'offline');
     } finally { clearTimeout(t); if (signal) signal.removeEventListener('abort', weiter); }
     // Antwort kommt als Server-Sent Event: die letzte „data:“-Zeile ist das JSON-RPC-Ergebnis
     var daten = text.split('\n').filter(function (z) { return z.indexOf('data:') === 0; });
     var j, res, inhalt;
-    try { j = JSON.parse(daten.length ? daten[daten.length - 1].slice(5) : text); } catch (e) { throw fehler('Kiwi.com-Antwort ist nicht lesbar.', 'kiwi'); }
-    if (j.error) throw fehler('Kiwi.com: ' + kurz(j.error.message || j.error), 'kiwi');
+    try { j = JSON.parse(daten.length ? daten[daten.length - 1].slice(5) : text); } catch (e) { throw fehler('Antwort von ' + wer + ' ist nicht lesbar.', 'mcp'); }
+    if (j.error) throw fehler(wer + ': ' + kurz(j.error.message || j.error), 'mcp');
     res = j.result || {}; inhalt = (res.content || [])[0];
-    if (res.isError || !inhalt) throw fehler('Kiwi.com: ' + kurz(inhalt && inhalt.text), 'kiwi');
-    try { return JSON.parse(inhalt.text); } catch (e) { throw fehler('Kiwi.com: ' + kurz(inhalt.text), 'kiwi'); }
+    if (res.isError || !inhalt) throw fehler(wer + ': ' + kurz(inhalt && inhalt.text), 'mcp');
+    try { return JSON.parse(inhalt.text); } catch (e) { throw fehler(wer + ': ' + kurz(inhalt.text), 'mcp'); }
   }
   function kiwiArgs(s, von, klasse) {
     var p = personen(s), erw = p.erw + p.jugend;
@@ -1962,6 +1963,123 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
     var bz = (rb.d.itineraries || []).map(function (it) { return kiwiFlugBauen(s, 'business', it, zeit); }).filter(function (f) { return passt(f) && f.kabineWieGewuenscht; });
     if (bz.length) lauf.businessFlug = flugSortieren(bz)[0];
     else lauf.warnungen.push('Für diese Strecke gibt es bei Kiwi.com keinen Business-Tarif.');
+  }
+
+  // ---------------- Unterkünfte über lastminute.com ----------------
+  // Ablauf laut Schnittstelle: Ziel-ID auflösen, Hotels suchen, je Hotel Zimmer mit Verpflegung holen, Buchungslink erzeugen.
+  var LM_VERPFLEGUNG = { ROOM_ONLY: 'ohne', BED_BREAKFAST: 'Frühstück', HALF_BOARD: 'Halbpension', FULL_BOARD: 'Vollpension', ALL_INCLUSIVE: 'All Inclusive' };
+  var LM_STUFE = { BED_BREAKFAST: 1, HALF_BOARD: 2, FULL_BOARD: 3, ALL_INCLUSIVE: 4 };
+  var WUNSCH_STUFE = { fruehstueck: 1, halbpension: 2, allinclusive: 4 };
+  function lmAbruf(werkzeug, args, signal) { return mcpAbruf(LM_URL, 'lastminute.com', werkzeug, args, signal); }
+  function nichtAbbruch(e) { if (e && e.code === 'abgebrochen') throw e; return null; }
+  async function lmZiel(s, signal) {
+    var r = await lmAbruf('resolve_destination_id', { lang: 'de', city_name: s.ziel }, signal);
+    var x = r.success && r.id ? r : (r.suggestions || [])[0];
+    return x && x.id ? { id: String(x.id), name: x.name, land: String(x.country_code || '').toLowerCase() || null, genau: x === r } : null;
+  }
+  function lmSuche(s, zielId, typ, signal) {
+    var a = { destination: zielId, date_from: s.hin, date_to: s.rueck, adults: String(personen(s).erw), lang: 'de', sort: 'recommended', max_results: 20 };
+    if ((s.kinderAlter || []).length) a.ch_ages = s.kinderAlter.map(Number).join(',');
+    if (typ === 'villa') { a.accommodation_type = '9'; if (s.villa && s.villa.privatpool) a.accommodation_facilities = '4'; }
+    else { a.accommodation_type = '1,2,14'; if ((s.sterne || []).length) a.hotel_stars = s.sterne.join(','); }
+    return lmAbruf('search_only_hotel', a, signal);
+  }
+  async function lmUnterkunft(s, such, h, typ, signal, zeit) {
+    var o = await lmAbruf('select_hotel_options', { search_id: such.search_id, hotel_internal_id: h.internal_id_hotel, date_from: s.hin, date_to: s.rueck }, signal);
+    var wunsch = WUNSCH_STUFE[s.verpflegung] || 0;
+    var zimmer = (o.room_options || []).filter(function (r) { return r.currency === 'EUR' && r.price > 0 && (LM_STUFE[r.meal_plan] || 0) >= wunsch; })
+      .sort(function (a, b) { return a.price - b.price; });
+    if (!zimmer.length || !o.pricing_id) return null;
+    var z = zimmer[0], l = await lmAbruf('generate_booking_link', { pricing_id: o.pricing_id, rate_id: z.rate_id }, signal);
+    var url = /^https:\/\/www\.lastminute\.com\/[^\s"'<>]+$/.test(l.booking_url || '') ? l.booking_url : null;
+    if (!url) return null;
+    var n = naechte(s), preis = r2(z.price), verpf = LM_VERPFLEGUNG[z.meal_plan] || null, storno = String(z.cancellation || '');
+    var frei = /^free cancellation/i.test(storno) ? true : /non.?refundable/i.test(storno) ? false : null, bis = (storno.match(/(\d{4}-\d{2}-\d{2})/) || [])[1];
+    return {
+      id: 'lm-' + h.internal_id_hotel, typ: typ, name: String(h.name).trim().slice(0, 120), bild: httpsUrl(h.image),
+      sterne: h.stars > 0 && h.stars <= 5 ? h.stars : null, note: h.rating > 0 && h.rating <= 100 ? Math.round(h.rating) / 10 : null, notenWort: null,
+      bewertungen: h.reviews > 0 ? h.reviews : 0, ort: o.hotel && o.hotel.address ? String(o.hotel.address).trim().slice(0, 80) : null,
+      entfernung: typeof h.distance_km === 'number' ? h.distance_km : null, verpflegung: verpf, zimmer: String(z.room_name || '').trim() || null,
+      schlafzimmer: null, privatpool: null, stornierbar: frei,
+      preis: posten(preis, 'live', 'lastminute.com', zeit, n + ' Nächte, Gesamtpreis für alle Gäste' + (verpf && verpf !== 'ohne' ? ' mit ' + verpf : '')),
+      vorOrt: [], preisNacht: r2(preis / n),
+      anbieter: [{ name: 'lastminute.com', betrag: preis, url: url, art: 'live', zeit: zeit, vergleichbar: true, text: 'Aufenthalt gesamt laut lastminute.com' }],
+      buchenUrl: url, lat: null, lon: null, ortUngenau: true,
+      hinweise: [frei && bis ? 'Kostenlos stornierbar bis ' + datumDe(bis) + '.' : null, 'Kurtaxe und Gebühren vor Ort: bei lastminute.com keine Angabe.'].filter(Boolean),
+      gesponsert: false, vergleich: 'nur-einer', _zeit: zeit
+    };
+  }
+  async function lmUnterkuenfte(s, lauf, signal, flughafen) {
+    var z = await lmZiel(s, signal).catch(nichtAbbruch), zielId = z && z.id;
+    if (!zielId) zielId = await flughafen; // z. B. „Malediven“ kennt lastminute nur über den Flughafen (MLE)
+    if (!zielId) {
+      lauf.quelle('lastminute.com', 0, 'Ziel nicht gefunden');
+      lauf.warnungen.push('lastminute.com kennt „' + s.ziel + '“ nicht. Bitte einen Ort eingeben, zum Beispiel Palma de Mallorca.');
+      return z;
+    }
+    if (z && !z.genau) lauf.warnungen.push('Unterkünfte gesucht in ' + z.name + '.');
+    lauf.melde('hotels', 'Unterkünfte bei lastminute.com …', 0.3);
+    var typen = s.art === 'beides' ? ['hotel', 'villa'] : [s.art === 'villa' ? 'villa' : 'hotel'], fehlerText = [];
+    var listen = await Promise.all(typen.map(function (typ) {
+      return lmSuche(s, zielId, typ, signal).then(function (r) { return { typ: typ, r: r }; }, function (e) { nichtAbbruch(e); fehlerText.push(e.message); return { typ: typ, r: {} }; });
+    }));
+    var zeit = Date.now(), auf = [];
+    listen.forEach(function (x) {
+      (x.r.products_summary || []).filter(function (h) { return h.currency === 'EUR' && h.price_total > 0; }).slice(0, x.typ === 'villa' ? 6 : 10).forEach(function (h) {
+        auf.push(lmUnterkunft(s, x.r, h, x.typ, signal, zeit).catch(nichtAbbruch));
+      });
+    });
+    lauf.melde('hotels', 'Zimmer, Verpflegung und Buchungslinks werden geholt …', 0.5);
+    var us = (await Promise.all(auf)).filter(Boolean);
+    lauf.hotels = us.filter(function (u) { return u.typ === 'hotel'; });
+    lauf.villen = us.filter(function (u) { return u.typ === 'villa'; });
+    lauf.quelle('lastminute.com', us.length, us.length ? null : fehlerText[0] || 'keine passende Unterkunft');
+    if (!us.length) lauf.warnungen.push('lastminute.com hat keine passende Unterkunft mit Preis gefunden' + (s.verpflegung && s.verpflegung !== 'egal' ? ' (mit der gewählten Verpflegung)' : '') + '.');
+    return z;
+  }
+  // Ortsmitte für die Transferschätzung (Open-Meteo, frei und ohne Schlüssel)
+  async function ortKoord(name, signal) {
+    try {
+      var r = await fetch('https://geocoding-api.open-meteo.com/v1/search?count=1&language=de&name=' + encodeURIComponent(name), { signal: signal });
+      var x = ((await r.json()).results || [])[0];
+      return x && typeof x.latitude === 'number' ? { lat: x.latitude, lon: x.longitude, land: String(x.country_code || '').toLowerCase() } : null;
+    } catch (e) { return null; }
+  }
+
+  // Flüge (Kiwi.com) und Unterkünfte (lastminute.com) gleichzeitig: kostenlos, ohne Zugang. Claude nur als Reserve für Unterkünfte.
+  async function gratisSuche(s, lauf, ctrl, setzeZiel) {
+    lauf.vergleich = 0;
+    var sig = ctrl.signal, flugFertig, kostenEuro = 0;
+    var ziel = { name: s.ziel, flughafen: null, land: null, lat: null, lon: null, _flugZiel: null, _booking: null, _vrbo: null };
+    setzeZiel(ziel); // Zwischenstände zeigen schon Flüge
+    var flughafen = new Promise(function (ok) { flugFertig = ok; });
+    var flugTeil = kiwiFlugKette(s, lauf, sig).catch(function (err) {
+      nichtAbbruch(err);
+      lauf.warnungen.push('Flüge: ' + err.message);
+      if (!lauf.quellen.some(function (q) { return q.name === 'Kiwi.com'; })) lauf.quelle('Kiwi.com', 0, err.message);
+    }).finally(function () { var f = lauf.fluegeKomplett[0]; flugFertig(f ? f.hin.nach : null); });
+    var hotelTeil = lmUnterkuenfte(s, lauf, sig, flughafen).catch(function (err) {
+      nichtAbbruch(err);
+      lauf.warnungen.push('Unterkünfte: ' + err.message);
+      if (!lauf.quellen.some(function (q) { return q.name === 'lastminute.com'; })) lauf.quelle('lastminute.com', 0, err.message);
+      return null;
+    });
+    var res = await Promise.all([flugTeil, hotelTeil]);
+    // Ortsmitte des Ortes, in dem lastminute.com gesucht hat (z. B. Palma statt Inselmitte von Mallorca)
+    res[2] = await ortKoord((res[1] && res[1].name) || s.ziel, sig);
+    if (!lauf.hotels.length && !lauf.villen.length && claudeDa()) {
+      lauf.melde('hotels', 'Claude sucht Unterkünfte bei Expedia … das dauert 1–3 Minuten', 0.6);
+      try { var c = await MV.claude.unterkuenfte(s, sig); kostenEuro = c.kostenEuro; claudeUebernehmen(c.daten, s, lauf); }
+      catch (e) { nichtAbbruch(e); lauf.warnungen.push('Claude: ' + e.message); }
+    }
+    var z = res[1], o = res[2], f = lauf.fluegeKomplett[0], fk = f ? FLUGHAFEN[f.hin.nach] : null;
+    var land = (z && z.land) || (o && o.land) || null;
+    // Ortsmitte nur übernehmen, wenn sie zum Zielflughafen oder zum Land passt (sonst z. B. „Bali“ in Indien)
+    var passt = o && ((fk && km(fk.lat, fk.lon, o.lat, o.lon) < 400) || (!fk && land && o.land === land));
+    ziel.flughafen = f ? f.hin.nach : null; ziel.land = land;
+    ziel.lat = passt ? o.lat : fk ? fk.lat : null; ziel.lon = passt ? o.lon : fk ? fk.lon : null;
+    setzeZiel(ziel);
+    return { ziel: ziel, kostenEuro: kostenEuro, dienst: kostenEuro ? 'claude' : 'gratis' };
   }
 
   // ---------------- Unterkünfte ----------------
@@ -2473,8 +2591,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
     if (!vollstaendig(e)) { try { localStorage.removeItem(k); } catch (x) {} return null; } // Altlast aus früherem Stand: neu suchen
     var min = Math.round((Date.now() - e.zeit) / 60000);
     e.kostenPunkte = 0; e.ausCache = true;
-    if (e.dienst === 'claude') e.kostenEuro = 0;
-    e.warnungen = ['Gleiche Suche vor ' + min + ' Min.: Ergebnis aus dem Zwischenspeicher, ' + (e.dienst === 'claude' ? 'keine neuen Kosten.' : 'keine Punkte verbraucht.')].concat(e.warnungen || []);
+    if (e.dienst === 'claude' || e.dienst === 'gratis') e.kostenEuro = 0;
+    e.warnungen = ['Gleiche Suche vor ' + min + ' Min.: Ergebnis aus dem Zwischenspeicher.'].concat(e.warnungen || []);
     return e;
   }
   function cacheSchreiben(k, e) {
@@ -2486,8 +2604,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
   }
 
   async function suchen(sucheRoh, fortschritt, optionen) {
-    var s = sucheNormal(sucheRoh), opt = optionen || {}, mitClaude = claudeDa();
-    var ck = cacheSchluessel(s, opt) + (mitClaude ? ':k' : '');
+    var s = sucheNormal(sucheRoh), opt = optionen || {};
+    var ck = cacheSchluessel(s, opt) + ':g';
     if (!opt.neu) { var c = cacheLesen(ck); if (c) { if (fortschritt) try { fortschritt({ schritt: 'fertig', text: 'Aus dem Zwischenspeicher', anteil: 1, teil: c }); } catch (e) { /* UI */ } return c; } }
     var ziel = null;
     var ctrl = new AbortController(), aussen = opt.signal || null;
@@ -2502,21 +2620,16 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
         try { if (ziel && schritt !== 'ziel') teil = ohneIntern(ergebnisBauen(lauf, s, ziel, false)); } catch (e) { teil = null; }
         try { fortschritt({ schritt: schritt, text: text, anteil: anteil, teil: teil }); } catch (e) { /* Fehler der Oberfläche nicht in die Suche tragen */ }
       } };
-    if (mitClaude) {
-      var cr = await claudeSuche(s, lauf, opt, ctrl, function (z) { ziel = z; });
-      return abschluss(lauf, s, cr.ziel, ck, fortschritt, cr);
-    }
-    ziel = await zielAufloesen(s, lauf);
-    lauf.zeit = Date.now();
-    try { await Promise.all([flugKette(s, ziel, lauf), unterkuenfte(s, ziel, lauf)]); }
-    catch (err) { ctrl.abort(); throw err; } // auch bei anderen Fehlern keine Abrufe weiterlaufen lassen
-    return abschluss(lauf, s, ziel, ck, fortschritt, null);
+    // Immer der kostenlose Weg (Kiwi.com + lastminute.com): kein Zugang, keine Einrichtung nötig
+    try { var gr = await gratisSuche(s, lauf, ctrl, function (z) { ziel = z; }); }
+    catch (err) { ctrl.abort(); throw err; }
+    return abschluss(lauf, s, gr.ziel, ck, fortschritt, gr);
   }
   async function abschluss(lauf, s, ziel, ck, fortschritt, claude) {
     var e = ergebnisBauen(lauf, s, ziel, true);
     e.business = await businessBauen(lauf, s, ziel, e.pakete);
     e.kostenPunkte = lauf.kosten; e.warnungen = lauf.warnungen.slice();
-    if (claude) { e.dienst = 'claude'; e.kostenEuro = claude.kostenEuro; }
+    if (claude) { e.dienst = claude.dienst || 'claude'; e.kostenEuro = claude.kostenEuro; }
     if (!e.pakete.bestes) e.warnungen.push(!lauf.einfach.length ? (claude && (lauf.hotels.length + lauf.villen.length) ? 'Ohne Flugpreise kein Gesamtpaket: die Unterkünfte stehen unten mit Gesamtpreis für den Aufenthalt.' : 'Ohne Flug kein Gesamtpaket.') : !(lauf.hotels.length + lauf.villen.length) ? 'Noch keine passende Unterkunft gefunden.' :
       'Kein Paket liegt unter ' + eur0(s.budget * 1.1) + ' (Budget + 10 %). Günstigste Variante liegt bei ' + eur0(e.pakete.guenstigsterPreis) + '.');
     e = ohneIntern(e);
@@ -2534,7 +2647,7 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
   MV.daten = {
     version: '2026-10-31',
     suchen: suchen,
-    schluessel: function () { var f = !!schluesselLesen(), c = claudeDa(); return { vorhanden: f || c, firecrawl: f, claude: c }; },
+    schluessel: function () { var f = !!schluesselLesen(), c = claudeDa(); return { vorhanden: true, gratis: true, firecrawl: f, claude: c }; },
     schluesselSetzen: schluesselSetzen,
     schluesselLoeschen: schluesselLoeschen,
     schluesselUebernehmen: schluesselUebernehmen,
@@ -2824,8 +2937,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
     $('h-rueck').textContent = num(n) && n > 0 ? tagLang($('f-rueck').value) + ' · ' + n + (n === 1 ? ' Nacht' : ' Nächte') : tagLang($('f-rueck').value);
     var a = abflugListe();
     $('abflug-text').textContent = 'Abflug ab ' + (a.length === ALLE_ABFLUG.length ? 'allen 6 Flughäfen (' + a.join(', ') + ')' : a.join(', ')) + ', höchstens 1 Umstieg.';
-    $('such-kosten').textContent = !(hatDaten() && hatSchluessel()) ? '' : claudeAktiv() ?
-      'Flüge über Kiwi.com kostenlos, Unterkünfte über Claude ' + MV.claude.kostenText + ', Dauer 1–3 Minuten.' :
+    $('such-kosten').textContent = !(hatDaten() && hatSchluessel()) ? '' : gratisAktiv() ?
+      'Kostenlos: Flüge von Kiwi.com, Hotels von lastminute.com. Dauer etwa 15–30 Sekunden.' :
       'Eine Suche kostet ca. ' + kostenSchaetzung(art, a) + ' Firecrawl-Punkte' + (num(S.guthaben) ? ', Guthaben ' + zahl(S.guthaben) + '.' : '.');
     guthabenWarnung(art, a);
   }
@@ -2833,14 +2946,14 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
   /* Schätzung laut Datenschicht: 5 je Abflughafen, 5 Hotels, 10 Villen, 10 Rückflug, 10 Business, 5 Preissuche, Portalvergleich 20–50 */
   function kostenBereich(art, abflug, vergleich) {
     var n = (abflug || abflugListe()).length * 5 + 10 + 10;
-    if (claudeAktiv()) return [n, n + 5]; // Unterkünfte kommen über Claude, Firecrawl nur noch für Flüge
+    if (gratisAktiv()) return [0, 0]; // Kiwi.com und lastminute.com kosten nichts
     if (art !== 'villa') n += 5; if (art !== 'hotel') n += 10;
     var mitV = (vergleich == null ? vergleichAn() : vergleich) && art !== 'villa';
     return mitV ? [n + 20, n + 55] : [n, n + 5];
   }
   function kostenSchaetzung(art, abflug, vergleich) { var k = kostenBereich(art, abflug, vergleich); return k[0] + '–' + k[1]; }
   function guthabenLaden() {
-    if (claudeAktiv() || !firecrawlDa() || typeof MV.daten.guthaben !== 'function') return;
+    if (gratisAktiv() || !firecrawlDa() || typeof MV.daten.guthaben !== 'function') return;
     Promise.resolve().then(function () { return MV.daten.guthaben(); }).then(function (g) {
       S.guthaben = g && num(g.rest) ? g.rest : null; S.guthabenBis = g && g.bis || null; formAktualisieren();
     }, function (err) { console.error('Guthaben', err); });
@@ -2848,7 +2961,7 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
   function guthabenWarnung(art, a) {
     var el = $('guthaben-warnung'); if (!el) return;
     var k = kostenBereich(art, a);
-    if (claudeAktiv() || !num(S.guthaben) || S.guthaben >= k[1]) { el.hidden = true; el.innerHTML = ''; return; } // mit Claude kein Firecrawl mehr
+    if (gratisAktiv() || !num(S.guthaben) || S.guthaben >= k[1]) { el.hidden = true; el.innerHTML = ''; return; } // kostenloser Weg: kein Firecrawl mehr
     var fra = kostenBereich(art, ['FRA']), ohneV = kostenBereich(art, a, false), kn = [];
     if (a.length > 1 && fra[1] < k[1]) kn.push('<button type="button" class="knopf-klein" data-aktion="nur-fra">Nur ab FRA suchen (ca. ' + fra[0] + '–' + fra[1] + ' Punkte)</button>');
     if (vergleichAn() && art !== 'villa' && ohneV[1] < k[1]) kn.push('<button type="button" class="knopf-klein" data-aktion="vergleich-aus">Portalvergleich aus (ca. ' + ohneV[0] + '–' + ohneV[1] + ' Punkte)</button>');
@@ -2924,6 +3037,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
   function hatSchluessel() { try { return hatDaten() && (typeof MV.daten.schluessel !== 'function' || !!MV.daten.schluessel().vorhanden); } catch (e) { return false; } }
   /* Mit Claude-Zugang: Unterkünfte über Claude (Expedia), Firecrawl nur noch für Flüge */
   function claudeAktiv() { try { return !!(MV.claude && MV.claude.schluessel().vorhanden); } catch (e) { return false; } }
+  /* Kostenloser Weg: Flüge von Kiwi.com, Unterkünfte von lastminute.com, ohne Zugang und ohne Einrichtung */
+  function gratisAktiv() { try { return hatDaten() && !!MV.daten.schluessel().gratis; } catch (e) { return false; } }
   function firecrawlDa() { try { var k = MV.daten.schluessel(); return k.firecrawl != null ? !!k.firecrawl : !!k.vorhanden; } catch (e) { return false; } }
   function beispiel() {
     var b = MV.beispiel; if (!b) return null;
@@ -2947,7 +3062,7 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
     if (typeof navigator !== 'undefined' && navigator.onLine === false) { S.fehler = { art: 'offline' }; S.suche = s; renderAlles(); return; }
     // Reicht das Guthaben sicher nicht, gar nicht erst suchen: Firecrawl zieht sonst Punkte ab und bricht mittendrin ab
     var bedarf = kostenBereich(s.art, s.abflug);
-    if (!claudeAktiv() && num(S.guthaben) && S.guthaben < bedarf[0]) {
+    if (!gratisAktiv() && num(S.guthaben) && S.guthaben < bedarf[0]) {
       var bis = S.guthabenBis ? S.guthabenBis.split('-').reverse().join('.') : null;
       S.fehler = { art: 'text', text: 'Das Firecrawl-Guthaben reicht für diese Suche nicht: noch ' + zahl(S.guthaben) + ' Punkte, gebraucht werden ca. ' + bedarf[0] + '–' + bedarf[1] + '. Mit dem Hobby-Plan auf firecrawl.dev geht es sofort weiter' + (bis ? ', sonst ab ' + bis + '.' : '.') };
       S.suche = s; renderAlles(); guthabenLaden(); return;
@@ -3088,7 +3203,7 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
       var f = S.fehler, alt = S.erg && num(S.erg.zeit) ? uhrzeit(S.erg.zeit) : null;
       if (f.art === 'zugang') h += f.claude ? '<div class="meldung meldung-bad" role="alert"><p><strong>Claude-Zugang ungültig.</strong> Bitte den Zugang neu kopieren und unter Einstellungen „Claude-Zugang einfügen“ tippen.</p><button type="button" class="knopf-klein" data-aktion="einstellungen">Einstellungen öffnen</button></div>' :
         '<div class="meldung meldung-bad" role="alert"><p><strong>Zugang abgelehnt</strong> – der gespeicherte Firecrawl-Zugang gilt nicht mehr. Bitte den neuen Einrichtungslink öffnen.</p></div>';
-      if (f.art === 'offline') h += '<div class="meldung meldung-bad" role="alert"><p><strong>Keine Verbindung zum Preisdienst' + (claudeAktiv() ? ' (Claude)' : ' (Firecrawl)') + '.</strong> Bitte die Internetverbindung prüfen.' + (alt ? ' Die letzten Ergebnisse von ' + alt + ' Uhr bleiben sichtbar.' : '') + '</p><button type="button" class="knopf-klein" data-aktion="neu-laden">Erneut versuchen</button></div>';
+      if (f.art === 'offline') h += '<div class="meldung meldung-bad" role="alert"><p><strong>Keine Verbindung zu den Preisdiensten.</strong> Bitte die Internetverbindung prüfen.' + (alt ? ' Die letzten Ergebnisse von ' + alt + ' Uhr bleiben sichtbar.' : '') + '</p><button type="button" class="knopf-klein" data-aktion="neu-laden">Erneut versuchen</button></div>';
       else if (f.art === 'ziel') h += '<div class="meldung meldung-warn" role="alert"><p>Wir kennen ‚' + esc(f.eingabe) + '‘ nicht.' + (f.vorschlaege.length ? ' Meinst du …' : ' Probier den Flughafen-Code am Ziel (zum Beispiel DPS).') + '</p>' +
         (f.vorschlaege.length ? '<div class="knopf-reihe">' + f.vorschlaege.slice(0, 3).map(function (v) { return '<button type="button" class="knopf-klein" data-aktion="ziel-vorschlag" data-wert="' + esc(v) + '">' + esc(v) + '</button>'; }).join('') + '</div>' :
           '<button type="button" class="knopf-klein" data-aktion="suche-aendern">Ziel ändern</button>') + '</div>';
@@ -3433,7 +3548,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
   function renderFussnote() {
     var e = S.erg, w = (e && e.warnungen) || [], extra = '';
     if (w.length) extra += '<ul>' + w.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
-    if (e && e.dienst === 'claude' && !S.demo) extra += '<p>Flüge über Kiwi.com kostenlos, Unterkünfte ca. ' + euro2(e.kostenEuro) + ' aus dem API-Guthaben im Claude-Abo.</p>';
+    if (e && e.dienst === 'gratis' && !S.demo) extra += '<p>Diese Suche war kostenlos: Flüge von Kiwi.com, Unterkünfte von lastminute.com.</p>';
+    else if (e && e.dienst === 'claude' && !S.demo) extra += '<p>Flüge über Kiwi.com kostenlos, Unterkünfte ca. ' + euro2(e.kostenEuro) + ' aus dem API-Guthaben im Claude-Abo (lastminute.com hatte nichts Passendes).</p>';
     else if (e && num(e.kostenPunkte) && !S.demo) extra += '<p>Diese Suche hat ' + zahl(e.kostenPunkte) + ' Firecrawl-Punkte gekostet.</p>';
     $('fussnote-extra').innerHTML = extra;
   }
@@ -3671,9 +3787,9 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
   function claudeStatus() {
     if (!MV.claude) return 'nicht verfügbar';
     var k = MV.claude.schluessel();
-    return !k.vorhanden ? 'fehlt' : k.ungueltig ? 'ungültig' : 'eingerichtet';
+    return !k.vorhanden ? 'aus (nicht nötig)' : k.ungueltig ? 'ungültig' : 'eingerichtet';
   }
-  function kostenZeile(art, a) { return claudeAktiv() ? 'Flüge kostenlos, Unterkünfte ' + MV.claude.kostenText : 'ca. ' + kostenSchaetzung(art, a) + ' Punkte'; }
+  function kostenZeile(art, a) { return gratisAktiv() ? 'kostenlos' : 'ca. ' + kostenSchaetzung(art, a) + ' Punkte'; }
   function euro2(x) { return num(x) ? x.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €' : KA; }
   function blattEinstellungen() {
     var t = roh('theme') || 'auto', a = abflugListe(), schl = hatDaten() ? hatSchluessel() : null, fcDa = schl && firecrawlDa();
@@ -3682,20 +3798,22 @@ window.MV_FASSUNG = "mv-2026-10-31-1718";
       '<div class="abschnitt"><label for="e-punkte"><h3>Amex-Punktestand</h3></label><input id="e-punkte" type="text" inputmode="numeric" autocomplete="off" placeholder="zum Beispiel 250.000" value="' + (punktestand() == null ? '' : NZ.format(punktestand())) + '" data-aktion-input="punkte"><p class="leise">Bleibt nur auf diesem Gerät.</p></div>' +
       '<fieldset class="abschnitt" style="border:0;padding:0;margin:0"><legend><h3>Abflughäfen</h3></legend><div class="check-raster">' +
       ALLE_ABFLUG.map(function (c) { return '<label><input type="checkbox" name="abflug" value="' + c + '"' + (a.indexOf(c) >= 0 ? ' checked' : '') + '><span>' + FLUGHAFEN[c] + ' (' + c + ')</span></label>'; }).join('') +
-      '</div><p class="fehler" id="e-abflug" hidden>Mindestens einen Flughafen wählen.</p><p class="leise">Gilt ab der nächsten Suche.' + (claudeAktiv() ? '' : ' Jeder Flughafen kostet etwa 5 Punkte je Suche, weniger Flughäfen sparen Punkte.') + '</p></fieldset>' +
+      '</div><p class="fehler" id="e-abflug" hidden>Mindestens einen Flughafen wählen.</p><p class="leise">Gilt ab der nächsten Suche.' + (gratisAktiv() ? '' : ' Jeder Flughafen kostet etwa 5 Punkte je Suche, weniger Flughäfen sparen Punkte.') + '</p></fieldset>' +
       '<div class="abschnitt"><h3>Preisdienst</h3>' +
-      (claudeAktiv() ? '' : '<label class="schalter"><input type="checkbox" id="e-vergleich" role="switch"' + (vergleichAn() ? ' checked' : '') + '><span class="schalter-text">Portalvergleich (Agoda) – kostet 20–50 Punkte mehr</span><span class="schalter-bahn" aria-hidden="true"></span></label>') + '<div>' +
-      '<div class="status-zeile"><span>Claude (Unterkünfte)</span><strong id="e-claude">' + claudeStatus() + '</strong></div>' +
-      (MV.claude ? '<button type="button" class="knopf-klein" data-aktion="claude-einfuegen">Claude-Zugang einfügen</button><p class="leise" id="e-claude-info">Zugang (beginnt mit „sk-ant-“) vorher kopieren, dann tippen. Er bleibt nur auf diesem Gerät.</p>' : '') +
-      (claudeAktiv() ? '<div class="status-zeile"><span>Kiwi.com (Flüge)</span><strong>kostenlos, ohne Zugang</strong></div>' :
+      (gratisAktiv() ? '' : '<label class="schalter"><input type="checkbox" id="e-vergleich" role="switch"' + (vergleichAn() ? ' checked' : '') + '><span class="schalter-text">Portalvergleich (Agoda) – kostet 20–50 Punkte mehr</span><span class="schalter-bahn" aria-hidden="true"></span></label>') + '<div>' +
+      (gratisAktiv() ? '<div class="status-zeile"><span>Kiwi.com (Flüge)</span><strong>kostenlos, ohne Zugang</strong></div>' +
+      '<div class="status-zeile"><span>lastminute.com (Unterkünfte)</span><strong>kostenlos, ohne Zugang</strong></div>' : '') +
+      '<div class="status-zeile"><span>Claude (Reserve für Unterkünfte)</span><strong id="e-claude">' + claudeStatus() + '</strong></div>' +
+      (MV.claude ? '<button type="button" class="knopf-klein" data-aktion="claude-einfuegen">Claude-Zugang einfügen</button><p class="leise" id="e-claude-info">Nicht nötig. Nur wenn lastminute.com nichts findet, sucht Claude bei Expedia (kostet API-Guthaben). Zugang (beginnt mit „sk-ant-“) vorher kopieren, dann tippen. Er bleibt nur auf diesem Gerät.</p>' : '') +
+      (gratisAktiv() ? '' :
       '<div class="status-zeile"><span>Firecrawl eingerichtet</span><strong>' + (schl === null ? 'nein (Beispielmodus)' : fcDa ? (S.zugangUngueltig ? 'ungültig' : 'ja') : 'nein') + '</strong></div>' +
       '<div class="status-zeile"><span>Guthaben</span><strong id="e-guthaben">' + (fcDa && typeof MV.daten.guthaben === 'function' ? 'wird geladen …' : KA) + '</strong></div>') +
-      '<div class="status-zeile"><span>Kosten der letzten Suche</span><strong>' + (S.erg && !S.demo && S.erg.dienst === 'claude' ? 'ca. ' + euro2(S.erg.kostenEuro) + ' aus dem Abo-Guthaben' : S.erg && num(S.erg.kostenPunkte) && !S.demo ? zahl(S.erg.kostenPunkte) + ' Punkte' : 'noch keine Suche') + '</strong></div>' +
+      '<div class="status-zeile"><span>Kosten der letzten Suche</span><strong>' + (S.erg && !S.demo && S.erg.dienst === 'gratis' ? 'kostenlos' : S.erg && !S.demo && S.erg.dienst === 'claude' ? 'ca. ' + euro2(S.erg.kostenEuro) + ' aus dem Abo-Guthaben' : S.erg && num(S.erg.kostenPunkte) && !S.demo ? zahl(S.erg.kostenPunkte) + ' Punkte' : 'noch keine Suche') + '</strong></div>' +
       '<div class="status-zeile"><span>Geschätzte Kosten je Suche</span><strong id="e-kosten">' + kostenZeile(((S.erg && S.erg.suche) || formLesen()).art, a) + '</strong></div>' +
-      '</div>' + (!fcDa && !claudeAktiv() && schl !== null ? '<p class="leise">Für Flugpreise den Firecrawl-Einrichtungslink auf diesem Gerät öffnen.</p>' : '') +
+      '</div>' + (!fcDa && !gratisAktiv() && !claudeAktiv() && schl !== null ? '<p class="leise">Für Flugpreise den Firecrawl-Einrichtungslink auf diesem Gerät öffnen.</p>' : '') +
       (hatDaten() && typeof MV.daten.cacheLeeren === 'function' ? '<button type="button" class="knopf-klein" data-aktion="cache-leeren">Zwischenspeicher leeren</button><p class="leise" id="e-cache" hidden>Zwischenspeicher geleert. Die nächste Suche holt alle Preise neu.</p>' : '') + '</div>';
     oeffneBlatt('Einstellungen', h);
-    if (fcDa && !claudeAktiv() && typeof MV.daten.guthaben === 'function') {
+    if (fcDa && !gratisAktiv() && typeof MV.daten.guthaben === 'function') {
       Promise.resolve().then(function () { return MV.daten.guthaben(); }).then(function (g) {
         var el = $('e-guthaben'); if (!el) return;
         el.textContent = g && num(g.rest) ? zahl(g.rest) + ' Punkte' + (num(g.plan) ? ' von ' + zahl(g.plan) : '') + (g.bis ? ', bis ' + (datumDE(g.bis) || g.bis) : '') : KA;
