@@ -1,5 +1,5 @@
 // Offline-Speicher: Seite und Symbole liegen auf dem Gerät, neue Fassung wird beim nächsten Öffnen geholt.
-const CACHE = "mv-2026-10-31-4";
+const CACHE = "mv-2026-10-31-5";
 const FILES = ["./", "index.html", "manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
