@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="de">
+<head>
+<title>Meilen und Villen</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b7a75">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Urlaub">
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
+<style>:root{padding-top:env(safe-area-inset-top,0px);color-scheme:light}body{margin:0;-webkit-text-size-adjust:100%}img{max-width:100%}[hidden]{display:none!important}</style>
+</head>
+<body>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Layout: ein Suchkopf wie eine Bordkarte, darunter vier Schritte (Region, Flug, Meilen, Villa) und die Budget-Rechnung als feste Leiste */
+:root{
+  --bg:#f3f6f6; --surface:#ffffff; --ink:#0f2a33; --muted:#4f6b73; --line:#d5e1e2;
+  --lagoon:#0b7a75; --lagoon-soft:#d8efed; --sun:#e0773a; --sun-soft:#fbe6d8;
+  --ok:#1b7f3b; --ok-soft:#dcf1e2; --bad:#b3261e; --bad-soft:#f8dedc;
+  --f-display:"Bricolage Grotesque", "Avenir Next", system-ui, sans-serif;
+  --f-body:"Figtree", -apple-system, "Segoe UI", sans-serif;
+  --f-code:"JetBrains Mono", ui-monospace, Menlo, monospace;
+  --r:14px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#071417; --surface:#0f2328; --ink:#e8f3f2; --muted:#9db8bb; --line:#21414a;
+  --lagoon:#45c4bb; --lagoon-soft:#123a3b; --sun:#f39a63; --sun-soft:#3a2416;
+  --ok:#6fd38e; --ok-soft:#14321f; --bad:#ff8a80; --bad-soft:#3b1715; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#071417; --surface:#0f2328; --ink:#e8f3f2; --muted:#9db8bb; --line:#21414a;
+  --lagoon:#45c4bb; --lagoon-soft:#123a3b; --sun:#f39a63; --sun-soft:#3a2416;
+  --ok:#6fd38e; --ok-soft:#14321f; --bad:#ff8a80; --bad-soft:#3b1715; color-scheme:dark}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:16px/1.5 var(--f-body);
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 120px}
+.wrap{max-width:1080px;margin:0 auto;display:grid;gap:20px}
+h1,h2,h3{font-family:var(--f-display);text-wrap:balance;margin:0;line-height:1.15}
+h1{font-size:clamp(28px,6vw,44px);font-weight:700;letter-spacing:-.01em}
+h2{font-size:22px;font-weight:700}
+h3{font-size:17px;font-weight:700}
+p{margin:0}
+.muted{color:var(--muted)}
+.small{font-size:13.5px}
+.code{font-family:var(--f-code);font-size:.92em;letter-spacing:.02em}
+header.top{padding-top:20px;display:grid;gap:6px}
+.eyebrow{font:600 12px/1 var(--f-body);text-transform:uppercase;letter-spacing:.12em;color:var(--lagoon)}
+
+/* Bordkarte */
+.pass{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);display:grid;grid-template-columns:1fr auto;overflow:hidden}
+.pass-main{padding:18px;display:grid;gap:14px;min-width:0}
+.pass-stub{border-left:2px dashed var(--line);padding:18px;display:grid;align-content:center;gap:4px;background:var(--lagoon-soft);min-width:150px}
+.route{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.iata{font:700 clamp(30px,7vw,46px)/1 var(--f-code);letter-spacing:.02em}
+.plane{color:var(--sun);font-size:22px}
+.fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}
+label{display:grid;gap:4px;font-size:13px;font-weight:600;color:var(--muted)}
+input,select{font:16px var(--f-body);color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px;width:100%;min-width:0}
+input:focus-visible,select:focus-visible,button:focus-visible,a:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+@media (max-width:620px){.pass{grid-template-columns:1fr}.pass-stub{border-left:0;border-top:2px dashed var(--line)}}
+
+/* Schritte */
+section.step{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:18px;display:grid;gap:14px;min-width:0}
+.step-head{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.step-no{font:700 13px/1 var(--f-code);color:var(--lagoon);background:var(--lagoon-soft);padding:6px 8px;border-radius:8px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{font:600 14px var(--f-body);border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:9px 14px;border-radius:999px;cursor:pointer;min-height:44px}
+.chip[aria-pressed="true"]{background:var(--lagoon);border-color:var(--lagoon);color:var(--surface)}
+.cabins{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:820px){.cabins{grid-template-columns:1fr}}
+.cabin{border:1px solid var(--line);border-radius:12px;padding:14px;display:grid;gap:10px;align-content:start;min-width:0}
+.cabin.biz{border-color:var(--sun);background:var(--sun-soft)}
+.links{display:flex;flex-wrap:wrap;gap:8px}
+a.go{display:inline-flex;align-items:center;gap:6px;min-height:40px;padding:8px 12px;border-radius:10px;background:var(--lagoon);color:var(--surface);text-decoration:none;font-weight:600;font-size:14px}
+a.go.alt{background:transparent;color:var(--lagoon);border:1px solid var(--lagoon)}
+.pill{display:inline-block;font:600 12.5px/1 var(--f-body);padding:6px 9px;border-radius:999px}
+.pill.ok{background:var(--ok-soft);color:var(--ok)} .pill.bad{background:var(--bad-soft);color:var(--bad)} .pill.wait{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.tbl{overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;min-width:720px;font-size:14px}
+th,td{padding:10px 12px;border-bottom:1px solid var(--line);text-align:left;vertical-align:middle}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);background:var(--bg)}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+td input{padding:6px 8px;width:92px;text-align:right;font-variant-numeric:tabular-nums}
+tr.best td{background:var(--ok-soft)}
+tr:last-child td{border-bottom:0}
+.note{border-left:3px solid var(--sun);padding:8px 12px;background:var(--sun-soft);border-radius:0 10px 10px 0;font-size:14px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.check{display:grid;gap:6px;font-size:14px}
+.check div::before{content:"✓ ";color:var(--lagoon);font-weight:700}
+button.primary{font:600 15px var(--f-body);background:var(--sun);color:#fff;border:0;border-radius:10px;padding:12px 16px;min-height:46px;cursor:pointer}
+button.primary:disabled{opacity:.5;cursor:default}
+.answer{white-space:pre-wrap;font-size:15px;background:var(--bg);border:1px solid var(--line);border-radius:12px;padding:14px;min-height:60px}
+
+/* Budget-Leiste */
+.budgetbar{position:fixed;left:0;right:0;bottom:0;z-index:5;background:var(--surface);border-top:1px solid var(--line);
+  padding:10px max(16px,env(safe-area-inset-right,0px)) calc(10px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px))}
+.budgetbar .in{max-width:1080px;margin:0 auto;display:flex;gap:10px 18px;align-items:center;flex-wrap:wrap}
+.bnum{font:700 18px var(--f-code);font-variant-numeric:tabular-nums}
+.blab{font-size:12px;color:var(--muted);display:block}
+@media (prefers-reduced-motion:no-preference){.chip,a.go{transition:background .15s,color .15s}}
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <span class="eyebrow">Flug · Meilen · Pool-Villa</span>
+    <h1>Meilen und Villen</h1>
+    <p class="muted">Ziel und Zeitraum eingeben. Die App fragt nach der Region, öffnet die günstigsten Suchen fertig ausgefüllt und rechnet, ob Flug und Villa zusammen ins Budget passen.</p>
+  </header>
+
+  <!-- Suchfenster -->
+  <div class="pass" role="search">
+    <div class="pass-main">
+      <div class="route">
+        <span class="iata" id="v-from">FRA</span><span class="plane" aria-hidden="true">✈</span><span class="iata" id="v-to">MNL</span>
+        <span class="muted small" id="v-route-note"></span>
+      </div>
+      <div class="fields">
+        <label for="f-dest">Zielort
+          <input id="f-dest" list="dest-list" value="Philippinen" autocomplete="off">
+          <datalist id="dest-list"></datalist>
+        </label>
+        <label for="f-start">Hinflug<input id="f-start" type="date"></label>
+        <label for="f-end">Rückflug<input id="f-end" type="date"></label>
+        <label for="f-pax">Reisende<input id="f-pax" type="number" min="1" max="9" value="2" inputmode="numeric"></label>
+        <label for="f-origin">Abflug<input id="f-origin" value="FRA" maxlength="3" autocapitalize="characters"></label>
+        <label for="f-budget">Budget gesamt (€)<input id="f-budget" type="number" min="0" step="50" value="2000" inputmode="numeric"></label>
+      </div>
+    </div>
+    <div class="pass-stub">
+      <span class="eyebrow">Nächte</span>
+      <span class="bnum" id="v-nights">14</span>
+      <span class="small muted" id="v-dates"></span>
+    </div>
+  </div>
+
+  <!-- 1 Region -->
+  <section class="step" id="s-region">
+    <div class="step-head"><span class="step-no">1</span><h2 id="region-q">In welche Region auf den Philippinen?</h2></div>
+    <div class="chips" id="regions"></div>
+    <p class="small muted" id="region-note"></p>
+    <label for="f-custom" id="custom-wrap" hidden>Zielflughafen (IATA-Code), zum Beispiel DPS
+      <input id="f-custom" maxlength="3" autocapitalize="characters" style="max-width:160px">
+    </label>
+  </section>
+
+  <!-- 2 Flüge -->
+  <section class="step" id="s-flight">
+    <div class="step-head"><span class="step-no">2</span><h2>Günstigste Flüge</h2><span class="small muted">Sortiert nach Preis, alle Airlines der jeweiligen Suche</span></div>
+    <div class="cabins">
+      <div class="cabin" id="c-eco"></div>
+      <div class="cabin" id="c-pe"></div>
+      <div class="cabin biz" id="c-biz"></div>
+    </div>
+    <div id="domestic"></div>
+  </section>
+
+  <!-- 3 Meilen -->
+  <section class="step" id="s-miles">
+    <div class="step-head"><span class="step-no">3</span><h2>Business mit Amex-Punkten</h2><span class="small muted">Membership Rewards, Business Platinum Deutschland</span></div>
+    <div class="fields" style="max-width:640px">
+      <label for="f-points">Dein Punktestand<input id="f-points" type="number" min="0" step="1000" value="200000" inputmode="numeric"></label>
+      <label for="f-trip">Strecke<select id="f-trip"><option value="rt">Hin und zurück</option><option value="ow">Nur einfach</option></select></label>
+    </div>
+    <div class="tbl"><table id="t-partners">
+      <thead><tr><th>Programm</th><th>Fliegt mit</th><th class="num">Kurs MR : Meile</th><th class="num">Meilen p. P. einfach</th><th class="num">Steuern p. P. einfach (€)</th><th class="num">MR-Punkte gesamt</th><th class="num">Zuzahlung gesamt</th><th>Reicht?</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <p class="small muted">Alle Zahlen sind Startwerte und in der Tabelle änderbar. Prämienpreise schwanken; vor dem Übertrag immer erst den freien Sitz suchen.</p>
+    <div class="links" id="award-links"></div>
+    <div class="note"><strong>Erst Sitz finden, dann Punkte übertragen.</strong> Ein Übertrag von Amex zur Airline ist endgültig. Die App überträgt nie selbst.</div>
+    <h3>Economy kaufen und mit Meilen auf Business hochstufen</h3>
+    <div class="grid2" id="upgrades"></div>
+  </section>
+
+  <!-- 4 Villa -->
+  <section class="step" id="s-villa">
+    <div class="step-head"><span class="step-no">4</span><h2>Pool-Villa</h2><span class="small muted" id="villa-where"></span></div>
+    <div class="fields" style="max-width:760px">
+      <label for="f-sqm">Mindestfläche (m²)<input id="f-sqm" type="number" value="140" step="10" inputmode="numeric"></label>
+      <label for="f-beds">Schlafzimmer mindestens<input id="f-beds" type="number" value="2" min="1" inputmode="numeric"></label>
+      <label for="f-villa-found">Gefundener Villa-Preis gesamt (€)<input id="f-villa-found" type="number" min="0" step="10" placeholder="nach der Suche eintragen" inputmode="numeric"></label>
+    </div>
+    <p id="villa-budget" class="small"></p>
+    <div class="links" id="villa-links"></div>
+    <div class="check" id="villa-check"></div>
+  </section>
+
+  <!-- 5 Claude -->
+  <section class="step" id="s-claude">
+    <div class="step-head"><span class="step-no">5</span><h2>Claude fragen</h2><span class="small muted">Einschätzung aus Wissen, keine Live-Preise</span></div>
+    <p class="small muted">Claude bekommt Ziel, Region, Daten, Budget und deine Meilen-Tabelle und sagt, welche Kombination am ehesten passt und worauf du bei der Suche achten musst.</p>
+    <div><button class="primary" id="ask">Beste Kombination vorschlagen</button></div>
+    <div class="answer" id="answer" hidden></div>
+  </section>
+</div>
+
+<div class="budgetbar" aria-live="polite">
+  <div class="in">
+    <div><span class="blab">Flug-Zuzahlung (Meilen)</span><span class="bnum" id="b-flight">–</span></div>
+    <div><span class="blab">Villa</span><span class="bnum" id="b-villa">–</span></div>
+    <div><span class="blab">Gesamt / Budget</span><span class="bnum" id="b-total">–</span></div>
+    <span class="pill wait" id="b-verdict">Villa-Preis fehlt</span>
+  </div>
+</div>
+
+<script>
+// Ziele mit Regionen. hub = Langstreckenziel, final = Inlandsflughafen
+const DEST = {
+  "Philippinen": {q:"auf den Philippinen", regions:[
+    {n:"El Nido, Palawan", hub:"MNL", final:"ENI", place:"El Nido, Palawan, Philippines", note:"Langstrecke nach Manila, weiter mit AirSwift nach El Nido oder nach Puerto Princesa (PPS) und 5 h Fahrt."},
+    {n:"Coron, Palawan", hub:"MNL", final:"USU", place:"Coron, Palawan, Philippines", note:"Manila, dann 1 h Inlandsflug nach Busuanga (USU)."},
+    {n:"Siargao", hub:"CEB", final:"IAO", place:"Siargao, Philippines", note:"Über Cebu oder Manila nach Siargao (IAO)."},
+    {n:"Boracay", hub:"MNL", final:"MPH", place:"Boracay, Philippines", note:"Manila, dann Caticlan (MPH) und 15 min Boot."},
+    {n:"Bohol / Panglao", hub:"CEB", final:"TAG", place:"Panglao, Bohol, Philippines", note:"Über Cebu (Fähre 2 h) oder direkt nach Panglao (TAG)."},
+    {n:"Cebu / Mactan", hub:"CEB", final:null, place:"Mactan, Cebu, Philippines", note:"Cebu wird von Doha, Singapur und Hongkong direkt angeflogen."}]},
+  "Thailand": {q:"in Thailand", regions:[
+    {n:"Phuket", hub:"HKT", final:null, place:"Phuket, Thailand", note:"Direkt über Doha, Dubai oder Abu Dhabi."},
+    {n:"Koh Samui", hub:"BKK", final:"USM", place:"Koh Samui, Thailand", note:"Bangkok, dann Bangkok Airways nach Samui."},
+    {n:"Krabi", hub:"BKK", final:"KBV", place:"Krabi, Thailand", note:"Bangkok oder Phuket, dann Krabi."},
+    {n:"Khao Lak", hub:"HKT", final:null, place:"Khao Lak, Thailand", note:"Phuket, dann 1 h Fahrt."}]},
+  "Bali": {q:"auf Bali", regions:[
+    {n:"Seminyak / Canggu", hub:"DPS", final:null, place:"Seminyak, Bali, Indonesia", note:"Größte Auswahl an Pool-Villen."},
+    {n:"Ubud", hub:"DPS", final:null, place:"Ubud, Bali, Indonesia", note:"Dschungel-Villen, oft günstiger als an der Küste."},
+    {n:"Uluwatu", hub:"DPS", final:null, place:"Uluwatu, Bali, Indonesia", note:"Klippen und Strände im Süden."},
+    {n:"Sanur / Nusa Dua", hub:"DPS", final:null, place:"Sanur, Bali, Indonesia", note:"Ruhig, flaches Wasser."}]},
+  "Malediven": {q:"auf den Malediven", regions:[
+    {n:"Malé-Atolle", hub:"MLE", final:null, place:"Maldives", note:"Villen auf Einheimischen-Inseln sind deutlich günstiger als Resorts."}]},
+  "Sri Lanka": {q:"in Sri Lanka", regions:[
+    {n:"Südküste (Galle, Tangalle)", hub:"CMB", final:null, place:"Galle, Sri Lanka", note:"Colombo, dann 2–3 h Fahrt."}]},
+  "Vietnam": {q:"in Vietnam", regions:[
+    {n:"Phu Quoc", hub:"SGN", final:"PQC", place:"Phu Quoc, Vietnam", note:"Saigon, dann 1 h nach Phu Quoc."},
+    {n:"Da Nang / Hoi An", hub:"DAD", final:null, place:"Hoi An, Vietnam", note:"Oft über Hanoi oder Saigon."}]},
+  "Mauritius": {q:"auf Mauritius", regions:[
+    {n:"Westküste / Norden", hub:"MRU", final:null, place:"Grand Baie, Mauritius", note:"Air Mauritius, Emirates, Air France."}]},
+  "Seychellen": {q:"auf den Seychellen", regions:[
+    {n:"Mahé / Praslin", hub:"SEZ", final:null, place:"Mahé, Seychelles", note:"Emirates, Qatar, Etihad, Condor."}]},
+  "Dubai": {q:"in Dubai", regions:[
+    {n:"Dubai", hub:"DXB", final:null, place:"Dubai, United Arab Emirates", note:"Emirates direkt ab Frankfurt."}]},
+  "Mexiko": {q:"in Mexiko", regions:[
+    {n:"Tulum / Riviera Maya", hub:"CUN", final:null, place:"Tulum, Mexico", note:"Condor und Lufthansa direkt nach Cancún."}]}
+};
+
+// Amex Membership Rewards Partner Deutschland, Stand 31.10.2026 (Amex-Partnerseite, Kurse gelten für alle Karten).
+// Etihad ist seit 15.06.2026 kein Partner mehr. Meilen und Steuern sind Startwerte (Blogs 2026), alle änderbar.
+const PARTNERS = [
+  {id:"avq", p:"Iberia / British Airways (Avios) → Qatar", via:"Qatar Airways über Doha", ratio:0.8, miles:{asia:80000,me:43000,io:60000,am:90000}, tax:{asia:285,me:200,io:250,am:300}, up:false,
+   tip:"Avios 1:1 von Iberia oder BA ins Qatar-Konto schieben. Günstigerer Kurs als direkt zu Qatar."},
+  {id:"qr", p:"Qatar Privilege Club (Avios)", via:"Qatar Airways über Doha", ratio:2/3, miles:{asia:80000,me:43000,io:60000,am:90000}, tax:{asia:285,me:200,io:250,am:300}, up:false,
+   tip:"Monatliche Privilege Deals mit bis zu 25 % Rabatt. Konto am besten jetzt schon anlegen."},
+  {id:"fb", p:"Air France-KLM Flying Blue", via:"KLM, Air France, Vietnam Airlines", ratio:0.8, miles:{asia:63750,me:55000,io:60000,am:72000}, tax:{asia:450,me:300,io:400,am:350}, up:false,
+   tip:"Dynamische Preise. Promo Rewards jeden Monat prüfen."},
+  {id:"sq", p:"Singapore KrisFlyer", via:"Singapore Airlines über Singapur", ratio:2/3, miles:{asia:108500,me:90000,io:100000,am:120000}, tax:{asia:100,me:100,io:100,am:150}, up:true,
+   tip:"Kaum Zuschläge. Upgrade bezahlter Tickets möglich (Premium Economy S/T/P/L)."},
+  {id:"cx", p:"Cathay Asia Miles", via:"Cathay Pacific über Hongkong", ratio:2/3, miles:{asia:91000,me:80000,io:91000,am:110000}, tax:{asia:250,me:250,io:250,am:300}, up:true,
+   tip:"Seit 01.05.2026 teurer. Upgrade um eine Klasse möglich."},
+  {id:"ek", p:"Emirates Skywards", via:"Emirates über Dubai", ratio:0.5, miles:{asia:110000,me:59000,io:90000,am:110000}, tax:{asia:600,me:446,io:550,am:600}, up:true,
+   tip:"Schlechtester Kurs (2:1) und hohe Zuschläge. Upgrade möglich."},
+  {id:"sk", p:"SAS EuroBonus", via:"SAS, Star-Alliance-Partner", ratio:0.8, miles:{asia:80000,me:60000,io:70000,am:70000}, tax:{asia:200,me:150,io:180,am:200}, up:false,
+   tip:"Meilenpreise für Asien nicht belegt, bitte selbst prüfen.", unsure:true},
+  {id:"dl", p:"Delta SkyMiles", via:"Delta, KLM, Air France, Partner", ratio:2/3, miles:{asia:150000,me:110000,io:130000,am:120000}, tax:{asia:150,me:120,io:150,am:120}, up:false,
+   tip:"Dynamisch und meist teuer. Nur als Notlösung."}
+];
+const REGION_ZONE = {MNL:"asia",CEB:"asia",HKT:"asia",BKK:"asia",DPS:"asia",SGN:"asia",DAD:"asia",MLE:"io",CMB:"io",MRU:"io",SEZ:"io",DXB:"me",CUN:"am"};
+
+const $ = id => document.getElementById(id);
+const fmtEUR = n => isFinite(n) ? n.toLocaleString("de-DE",{style:"currency",currency:"EUR",maximumFractionDigits:0}) : "–";
+const fmtN = n => Math.round(n).toLocaleString("de-DE");
+const store = {get(k,d){try{const v=localStorage.getItem("mv:"+k);return v==null?d:JSON.parse(v)}catch(e){return d}},
+               set(k,v){try{localStorage.setItem("mv:"+k,JSON.stringify(v))}catch(e){}}};
+
+const state = {regionIdx: store.get("regionIdx",0), partners: store.get("partners2",null) || PARTNERS.map(p=>({...p}))};
+
+function defaultDates(){
+  const s=new Date(); s.setDate(s.getDate()+75); const e=new Date(s); e.setDate(e.getDate()+14);
+  const iso=d=>d.toISOString().slice(0,10); return [iso(s),iso(e)];
+}
+function init(){
+  $("dest-list").innerHTML = Object.keys(DEST).map(k=>`<option value="${k}">`).join("");
+  const [s,e]=defaultDates();
+  for (const [id,def] of [["f-dest","Philippinen"],["f-start",s],["f-end",e],["f-pax","2"],["f-origin","FRA"],["f-budget","2000"],["f-points","200000"],["f-trip","rt"],["f-sqm","140"],["f-beds","2"],["f-villa-found",""],["f-custom",""]]){
+    $(id).value = store.get(id,def);
+    $(id).addEventListener("input",()=>{store.set(id,$(id).value); if(id==="f-dest"){state.regionIdx=0;store.set("regionIdx",0)} render()});
+  }
+  $("ask").addEventListener("click",askClaude);
+  render();
+}
+
+function trip(){
+  const destKey = Object.keys(DEST).find(k=>k.toLowerCase()===$("f-dest").value.trim().toLowerCase());
+  const d = destKey ? DEST[destKey] : null;
+  const reg = d ? d.regions[Math.min(state.regionIdx,d.regions.length-1)] : null;
+  const custom = $("f-custom").value.trim().toUpperCase();
+  const hub = reg ? reg.hub : (custom || "???");
+  const start=$("f-start").value, end=$("f-end").value;
+  const nights = Math.max(0,Math.round((new Date(end)-new Date(start))/864e5)) || 0;
+  return {destKey,d,reg,hub,final:reg?reg.final:null,place:reg?reg.place:$("f-dest").value.trim(),
+    origin:($("f-origin").value.trim().toUpperCase()||"FRA"),start,end,nights,pax:Math.max(1,+$("f-pax").value||1),
+    budget:+$("f-budget").value||0,zone:REGION_ZONE[hub]||"asia",rt:$("f-trip").value==="rt"};
+}
+
+const ratioTxt = r => ({"0.8":"5:4","0.667":"3:2","0.5":"2:1","1":"1:1"})[String(Math.round(r*1000)/1000)] || ("1:"+(Math.round(r*100)/100));
+const yymmdd = s => s.replace(/-/g,"").slice(2);
+const de = s => s ? new Date(s+"T12:00").toLocaleDateString("de-DE",{weekday:"short",day:"2-digit",month:"2-digit",year:"numeric"}) : "";
+function flightLinks(t,cabin,from,to){
+  const gCab={economy:"economy",premium:"premium economy",business:"business"}[cabin];
+  const kCab={economy:"economy",premium:"premium",business:"business"}[cabin];
+  const sCab={economy:"economy",premium:"premiumeconomy",business:"business"}[cabin];
+  const ret = t.rt ? ` through ${t.end}` : "";
+  const gq = encodeURIComponent(`Flights from ${from} to ${to} on ${t.start}${ret} ${gCab} ${t.pax} adults`);
+  const kPath = t.rt ? `${t.start}/${t.end}` : t.start;
+  return [
+    ["Google Flights",`https://www.google.com/travel/flights?hl=de&curr=EUR&q=${gq}`],
+    ["Skyscanner",`https://www.skyscanner.de/transport/fluege/${from.toLowerCase()}/${to.toLowerCase()}/${yymmdd(t.start)}/${t.rt?yymmdd(t.end)+"/":""}?adultsv2=${t.pax}&cabinclass=${sCab}&rtn=${t.rt?1:0}`],
+    ["Kayak",`https://www.kayak.de/flights/${from}-${to}/${kPath}/${kCab}/${t.pax}adults?sort=price_a`],
+    ["Momondo",`https://www.momondo.de/flight-search/${from}-${to}/${kPath}/${kCab}/${t.pax}adults?sort=price_a`]
+  ];
+}
+const linkHTML = (arr,alt) => arr.map(([n,u],i)=>`<a class="go${alt||i>0?" alt":""}" href="${u}" target="_blank" rel="noopener">${n} ↗</a>`).join("");
+
+function render(){
+  const t = trip();
+  $("v-from").textContent=t.origin; $("v-to").textContent=t.hub;
+  $("v-route-note").textContent = t.final ? `weiter nach ${t.final}` : "";
+  $("v-nights").textContent=t.nights; $("v-dates").textContent=`${de(t.start)} bis ${de(t.end)}`;
+
+  // Region
+  $("region-q").textContent = t.d ? `In welche Region ${t.d.q}?` : "Ziel nicht in der Liste: Zielflughafen eintragen";
+  $("custom-wrap").hidden = !!t.d;
+  $("regions").innerHTML = t.d ? t.d.regions.map((r,i)=>`<button class="chip" data-i="${i}" aria-pressed="${r===t.reg}">${r.n} <span class="code">${r.final||r.hub}</span></button>`).join("") : "";
+  $("regions").querySelectorAll(".chip").forEach(b=>b.onclick=()=>{state.regionIdx=+b.dataset.i;store.set("regionIdx",state.regionIdx);render()});
+  $("region-note").textContent = t.reg ? t.reg.note : "";
+
+  // Flüge
+  const cab = (id,title,sub,cabin) => { $(id).innerHTML = `<h3>${title}</h3><p class="small muted">${sub}</p><div class="links">${linkHTML(flightLinks(t,cabin,t.origin,t.hub))}</div>`; };
+  cab("c-eco","Economy","Günstigster Preis zuerst. Bei Kayak und Momondo ist schon nach Preis sortiert.","economy");
+  cab("c-pe","Premium Economy","Lohnt sich ab etwa 10 Stunden Flugzeit.","premium");
+  cab("c-biz","Business, nur wenn extrem günstig","Gekauft nur, wenn der Preis nah an Economy liegt. Sonst den Meilen-Weg darunter nehmen.","business");
+  $("domestic").innerHTML = t.final ? `<p class="small"><strong>Anschlussflug ${t.hub} → ${t.final}:</strong> separat und günstig buchen, mindestens 3 Stunden Umsteigezeit einplanen.</p><div class="links" style="margin-top:8px">${linkHTML(flightLinks(t,"economy",t.hub,t.final).slice(0,2),true)}</div>` : "";
+
+  renderMiles(t); renderVilla(t); renderBudget(t);
+}
+
+function bestPartner(t){
+  const legs = t.rt?2:1; const pts = +$("f-points").value||0;
+  const rows = state.partners.map(p=>{
+    const miles=p.miles[t.zone], tax=p.tax[t.zone];
+    const mr = Math.ceil(miles*legs*t.pax/p.ratio), cash = tax*legs*t.pax;
+    return {...p,milesZ:miles,taxZ:tax,mr,cash,enough:mr<=pts};
+  });
+  // beste Option: reicht der Punktestand, dann geringste Zuzahlung; Punkte als Gleichstand-Entscheid
+  // Reihenfolge: belegte Werte vor unbelegten, Punkte reichen vor reichen nicht, dann Zuzahlung plus Punkte (1 Punkt ≈ 1 Cent)
+  const score = r => (r.unsure?2e9:0) + (r.enough ? r.cash + r.mr*0.01 : 1e9 + r.mr);
+  rows.sort((a,b)=>score(a)-score(b));
+  return rows;
+}
+
+function renderMiles(t){
+  const rows = bestPartner(t);
+  $("t-partners").querySelector("tbody").innerHTML = rows.map((r,i)=>`
+    <tr class="${i===0?"best":""}" data-id="${r.id}">
+      <td><strong>${r.p}</strong>${i===0?' <span class="pill ok">Beste Wahl</span>':""}<div class="small muted">${r.tip||""}</div></td>
+      <td class="small">${r.via}</td>
+      <td class="num">${ratioTxt(r.ratio)} <input aria-label="Meilen je MR-Punkt ${r.p}" data-k="ratio" type="number" step="0.01" value="${Math.round(r.ratio*1000)/1000}"></td>
+      <td class="num"><input aria-label="Meilen ${r.p}" data-k="miles" type="number" step="500" value="${r.milesZ}"></td>
+      <td class="num"><input aria-label="Steuern ${r.p}" data-k="tax" type="number" step="10" value="${r.taxZ}"></td>
+      <td class="num">${fmtN(r.mr)}</td>
+      <td class="num">${fmtEUR(r.cash)}</td>
+      <td>${r.enough?'<span class="pill ok">reicht</span>':`<span class="pill bad">fehlen ${fmtN(r.mr-(+$("f-points").value||0))}</span>`}</td>
+    </tr>`).join("");
+  $("t-partners").querySelectorAll("input").forEach(inp=>inp.onchange=()=>{
+    const p = state.partners.find(x=>x.id===inp.closest("tr").dataset.id); const v=+inp.value;
+    if(inp.dataset.k==="ratio") p.ratio=v>0?v:p.ratio; else p[inp.dataset.k][t.zone]=v;
+    store.set("partners2",state.partners); render();
+  });
+  const sa = `https://seats.aero/search?min_seats=${t.pax}&applicable_cabin=business&additional_days=true&additional_days_num=7&date=${t.start}&origins=${t.origin}&destinations=${t.hub}`;
+  const saBack = `https://seats.aero/search?min_seats=${t.pax}&applicable_cabin=business&additional_days=true&additional_days_num=7&date=${t.end}&origins=${t.hub}&destinations=${t.origin}`;
+  $("award-links").innerHTML = linkHTML([["Freie Business-Prämiensitze hin (seats.aero)",sa],...(t.rt?[["Rückflug (seats.aero)",saBack]]:[]),["Punkte übertragen (Amex)","https://www.americanexpress.com/de-de/rewards/membership-rewards/"]]);
+  $("upgrades").innerHTML = rows.filter(r=>r.up).slice(0,4).map(r=>`
+    <div class="cabin"><h3>${r.p.split(" (")[0]}</h3>
+    <p class="small muted">Economy oder Premium Economy bei ${r.via.split(" über")[0]} buchen und mit Meilen hochstufen. Geht nur in bestimmten Buchungsklassen und nur, wenn Upgrade-Plätze frei sind. Lohnt sich, wenn Ticket plus Upgrade unter dem Business-Kaufpreis liegt.</p></div>`).join("") || '<p class="small muted">Kein Partner mit Upgrade für diese Strecke.</p>';
+  state.best = rows[0];
+}
+
+function renderVilla(t){
+  const best = state.best; const flight = best ? best.cash : 0;
+  const left = t.budget - flight; const perNight = t.nights ? left/t.nights : 0;
+  $("villa-where").textContent = t.place;
+  $("villa-budget").innerHTML = `Für die Villa bleiben <strong>${fmtEUR(left)}</strong> für ${t.nights} Nächte, also höchstens <strong>${fmtEUR(perNight)} pro Nacht</strong>. Die Suchen sind auf diesen Preis begrenzt.`;
+  const pn = Math.max(0,Math.floor(perNight)); const place = encodeURIComponent(t.place); const beds=Math.max(1,+$("f-beds").value||2);
+  $("villa-links").innerHTML = linkHTML([
+    ["Airbnb",`https://www.airbnb.de/s/${place}/homes?checkin=${t.start}&checkout=${t.end}&adults=${t.pax}&min_bedrooms=${beds}&amenities%5B%5D=7&room_types%5B%5D=Entire%20home%2Fapt&price_max=${pn}&currency=EUR`],
+    ["Booking.com",`https://www.booking.com/searchresults.de.html?ss=${place}&checkin=${t.start}&checkout=${t.end}&group_adults=${t.pax}&no_rooms=1&selected_currency=EUR&order=price&nflt=ht_id%3D213%3Bhotelfacility%3D433%3Bentire_place_bedroom_count%3D${beds}`],
+    ["Vrbo",`https://www.vrbo.com/de-de/search?destination=${place}&startDate=${t.start}&endDate=${t.end}&adults=${t.pax}&amenities=POOL&sort=PRICE_LOW_TO_HIGH`],
+    ["Agoda",`https://www.agoda.com/de-de/search?textToSearch=${place}&checkIn=${t.start}&checkOut=${t.end}&rooms=1&adults=${t.pax}&sort=priceLowToHigh`],
+    ["Google Unterkünfte",`https://www.google.com/travel/search?hl=de&q=${encodeURIComponent("Villa privater Pool "+beds+" Schlafzimmer "+t.place)}`]
+  ]);
+  $("villa-check").innerHTML = [
+    `Privater Pool, nicht Gemeinschaftspool (Fotos und Beschreibung prüfen)`,
+    `Fläche mindestens ${$("f-sqm").value} m²: in der Anzeige nach „m²“ oder „sqm“ suchen, kein Portal filtert danach`,
+    `${beds} getrennte Schlafzimmer`,
+    `Endpreis mit Reinigung und Gebühren, nicht nur Nachtpreis`,
+    `Kostenlose Stornierung, bis die Flüge fest sind`
+  ].map(x=>`<div>${x}</div>`).join("");
+}
+
+function renderBudget(t){
+  const flight = state.best ? state.best.cash : NaN; const villa = +$("f-villa-found").value;
+  $("b-flight").textContent = fmtEUR(flight);
+  $("b-villa").textContent = villa ? fmtEUR(villa) : "–";
+  const total = flight + (villa||0);
+  $("b-total").textContent = `${fmtEUR(total)} / ${fmtEUR(t.budget)}`;
+  const v = $("b-verdict");
+  if(!villa){v.className="pill wait";v.textContent="Villa-Preis fehlt"}
+  else if(total<=t.budget){v.className="pill ok";v.textContent=`passt, ${fmtEUR(t.budget-total)} Luft`}
+  else {v.className="pill bad";v.textContent=`${fmtEUR(total-t.budget)} über Budget`}
+}
+
+async function askClaude(){
+  const btn=$("ask"), out=$("answer");
+  const sample = window.claude?.use ? await window.claude.use("sample") : null;
+  if(!sample){out.hidden=false;out.textContent="Claude ist in dieser Ansicht nicht erreichbar. Öffne die App über claude.ai und melde dich an.";return}
+  const t=trip(); const rows=bestPartner(t);
+  const prompt = `Du bist Reiseplaner für Prämienflüge und Villen. Antworte auf Deutsch, in kurzen ganzen Sätzen, ohne Aufzählungszeichen-Wüsten, höchstens 220 Wörter.
+Reise: ab ${t.origin} nach ${t.place} (Langstreckenziel ${t.hub}${t.final?", Anschluss "+t.final:""}), ${t.start} bis ${t.end}, ${t.nights} Nächte, ${t.pax} Personen, ${t.rt?"hin und zurück":"einfach"}.
+Budget gesamt: ${t.budget} € für Flug-Zuzahlung und Villa. Amex Membership Rewards (Business Platinum, Deutschland): ${$("f-points").value} Punkte.
+Meilen-Tabelle (Startwerte des Nutzers, können abweichen): ${rows.map(r=>`${r.p}: ${r.milesZ} Meilen p.P. einfach Business, Umrechnung 1:${r.ratio}, Steuern ${r.taxZ} € p.P. einfach`).join("; ")}.
+Villa: privater Pool, mindestens ${$("f-sqm").value} m², ${$("f-beds").value} Schlafzimmer.
+Sag: 1) welches Meilenprogramm und welche Strecke am ehesten passt und warum, 2) welche Tabellenwerte du für zu optimistisch oder zu pessimistisch hältst, 3) in welchem Ortsteil der Region Pool-Villen dieser Größe am günstigsten sind und welcher Nachtpreis realistisch ist, 4) ob das Budget realistisch ist. Kennzeichne alles als Einschätzung ohne Live-Preise.`;
+  btn.disabled=true; out.hidden=false; out.textContent="Claude denkt nach …";
+  try{
+    const r = await sample(prompt,{onText:({text})=>{out.textContent=text}});
+    out.textContent = r.text;
+  }catch(e){
+    out.textContent = e && e.code==="not_granted" ? "Du hast den Zugriff auf Claude für diese Seite nicht erlaubt." :
+      e && e.code==="rate_limited" ? "Gerade zu viele Anfragen. Bitte in einer Minute noch einmal tippen." :
+      "Claude hat nicht geantwortet. Bitte noch einmal tippen.";
+  }finally{btn.disabled=false}
+}
+
+if(!window.claude) $("s-claude").hidden = true;
+init();
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(()=>{});
+</script>
+</body>
+</html>
