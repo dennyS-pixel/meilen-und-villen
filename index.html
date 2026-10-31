@@ -19,7 +19,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Figtree:wght@400;500;600&family=JetBrains+Mono:wght@500&display=swap">
 <style>
-/* Layout: ein Suchkopf wie eine Bordkarte, darunter vier Schritte (Region, Flug, Meilen, Villa) und die Budget-Rechnung als feste Leiste */
+/* Layout: ein Suchkopf wie eine Bordkarte, darunter vier Schritte (Region, Flug, Meilen, Unterkunft) und die Budget-Rechnung als feste Leiste */
 :root{
   --bg:#f3f6f6; --surface:#ffffff; --ink:#0f2a33; --muted:#4f6b73; --line:#d5e1e2;
   --lagoon:#0b7a75; --lagoon-soft:#d8efed; --sun:#e0773a; --sun-soft:#fbe6d8;
@@ -109,9 +109,9 @@ button.primary:disabled{opacity:.5;cursor:default}
 
 <div class="wrap">
   <header class="top">
-    <span class="eyebrow">Flug · Meilen · Pool-Villa</span>
+    <span class="eyebrow">Flug · Meilen · Unterkunft</span>
     <h1>Meilen und Villen</h1>
-    <p class="muted">Ziel und Zeitraum eingeben. Die App fragt nach der Region, öffnet die günstigsten Suchen fertig ausgefüllt und rechnet, ob Flug und Villa zusammen ins Budget passen.</p>
+    <p class="muted">Ziel und Zeitraum eingeben. Die App fragt nach der Region, öffnet die günstigsten Suchen fertig ausgefüllt und rechnet, ob Flug und Unterkunft zusammen ins Budget passen.</p>
   </header>
 
   <!-- Suchfenster -->
@@ -179,17 +179,20 @@ button.primary:disabled{opacity:.5;cursor:default}
     <div class="grid2" id="upgrades"></div>
   </section>
 
-  <!-- 4 Villa -->
+  <!-- 4 Unterkunft -->
   <section class="step" id="s-villa">
-    <div class="step-head"><span class="step-no">4</span><h2>Pool-Villa</h2><span class="small muted" id="villa-where"></span></div>
+    <div class="step-head"><span class="step-no">4</span><h2>Unterkunft</h2><span class="small muted" id="villa-where"></span></div>
     <div class="fields" style="max-width:760px">
-      <label for="f-sqm">Mindestfläche (m²)<input id="f-sqm" type="number" value="140" step="10" inputmode="numeric"></label>
+      <label for="f-sqm">Villa: Mindestfläche (m²)<input id="f-sqm" type="number" value="140" step="10" inputmode="numeric"></label>
       <label for="f-beds">Schlafzimmer mindestens<input id="f-beds" type="number" value="2" min="1" inputmode="numeric"></label>
-      <label for="f-villa-found">Gefundener Villa-Preis gesamt (€)<input id="f-villa-found" type="number" min="0" step="10" placeholder="nach der Suche eintragen" inputmode="numeric"></label>
+      <label for="f-villa-found">Gefundener Preis gesamt (€)<input id="f-villa-found" type="number" min="0" step="10" placeholder="nach der Suche eintragen" inputmode="numeric"></label>
     </div>
     <p id="villa-budget" class="small"></p>
-    <div class="links" id="villa-links"></div>
-    <div class="check" id="villa-check"></div>
+    <div class="cabins">
+      <div class="cabin"><h3>Pool-Villa</h3><p class="small muted">Privater Pool, ganze Villa für euch.</p><div class="links" id="villa-links"></div><div class="check" id="villa-check"></div></div>
+      <div class="cabin"><h3>Gästehaus</h3><p class="small muted">Familiengeführt, oft mit Frühstück und meist am günstigsten.</p><div class="links" id="guest-links"></div><div class="check" id="guest-check"></div></div>
+      <div class="cabin"><h3>Hotel</h3><p class="small muted">Mit Rezeption und Service, gut für kurze Stopps.</p><div class="links" id="hotel-links"></div><div class="check" id="hotel-check"></div></div>
+    </div>
   </section>
 
   <!-- 5 Claude -->
@@ -204,9 +207,9 @@ button.primary:disabled{opacity:.5;cursor:default}
 <div class="budgetbar" aria-live="polite">
   <div class="in">
     <div><span class="blab">Flug-Zuzahlung (Meilen)</span><span class="bnum" id="b-flight">–</span></div>
-    <div><span class="blab">Villa</span><span class="bnum" id="b-villa">–</span></div>
+    <div><span class="blab">Unterkunft</span><span class="bnum" id="b-villa">–</span></div>
     <div><span class="blab">Gesamt / Budget</span><span class="bnum" id="b-total">–</span></div>
-    <span class="pill wait" id="b-verdict">Villa-Preis fehlt</span>
+    <span class="pill wait" id="b-verdict">Preis Unterkunft fehlt</span>
   </div>
 </div>
 
@@ -392,7 +395,7 @@ function renderVilla(t){
   const best = state.best; const flight = best ? best.cash : 0;
   const left = t.budget - flight; const perNight = t.nights ? left/t.nights : 0;
   $("villa-where").textContent = t.place;
-  $("villa-budget").innerHTML = `Für die Villa bleiben <strong>${fmtEUR(left)}</strong> für ${t.nights} Nächte, also höchstens <strong>${fmtEUR(perNight)} pro Nacht</strong>. Die Suchen sind auf diesen Preis begrenzt.`;
+  $("villa-budget").innerHTML = `Für die Unterkunft bleiben <strong>${fmtEUR(left)}</strong> für ${t.nights} Nächte, also höchstens <strong>${fmtEUR(perNight)} pro Nacht</strong>. Die Suchen sind auf diesen Preis begrenzt.`;
   const pn = Math.max(0,Math.floor(perNight)); const place = encodeURIComponent(t.place); const beds=Math.max(1,+$("f-beds").value||2);
   $("villa-links").innerHTML = linkHTML([
     ["Airbnb",`https://www.airbnb.de/s/${place}/homes?checkin=${t.start}&checkout=${t.end}&adults=${t.pax}&min_bedrooms=${beds}&amenities%5B%5D=7&room_types%5B%5D=Entire%20home%2Fapt&price_max=${pn}&currency=EUR`],
@@ -408,6 +411,23 @@ function renderVilla(t){
     `Endpreis mit Reinigung und Gebühren, nicht nur Nachtpreis`,
     `Kostenlose Stornierung, bis die Flüge fest sind`
   ].map(x=>`<div>${x}</div>`).join("");
+  const rooms = Math.max(1,Math.ceil(t.pax/2));
+  const bk = ht => `https://www.booking.com/searchresults.de.html?ss=${place}&checkin=${t.start}&checkout=${t.end}&group_adults=${t.pax}&no_rooms=${rooms}&selected_currency=EUR&order=price&nflt=${ht}`;
+  $("guest-links").innerHTML = linkHTML([
+    ["Booking.com",bk("ht_id%3D216%3Bht_id%3D208")],
+    ["Agoda",`https://www.agoda.com/de-de/search?textToSearch=${encodeURIComponent("Guesthouse "+t.place)}&checkIn=${t.start}&checkOut=${t.end}&rooms=${rooms}&adults=${t.pax}&sort=priceLowToHigh`],
+    ["Airbnb",`https://www.airbnb.de/s/${place}/homes?checkin=${t.start}&checkout=${t.end}&adults=${t.pax}&price_max=${pn}&currency=EUR`],
+    ["Google Unterkünfte",`https://www.google.com/travel/search?hl=de&q=${encodeURIComponent("Gästehaus "+t.place)}`]
+  ]);
+  $("hotel-links").innerHTML = linkHTML([
+    ["Booking.com",bk("ht_id%3D204")],
+    ["Google Hotels",`https://www.google.com/travel/hotels?hl=de&curr=EUR&q=${encodeURIComponent("Hotels "+t.place)}`],
+    ["Expedia",`https://www.expedia.de/Hotel-Search?destination=${place}&startDate=${t.start}&endDate=${t.end}&adults=${t.pax}&rooms=${rooms}&sort=PRICE_LOW_TO_HIGH`],
+    ["Agoda",`https://www.agoda.com/de-de/search?textToSearch=${place}&checkIn=${t.start}&checkOut=${t.end}&rooms=${rooms}&adults=${t.pax}&sort=priceLowToHigh`],
+    ["Kayak",`https://www.kayak.de/hotels/${place}/${t.start}/${t.end}/${t.pax}adults?sort=price_a`]
+  ]);
+  $("guest-check").innerHTML = [`Bewertung ab 8 von 10`, `Frühstück im Preis`, `Lage zu Strand oder Fähre`, `Endpreis mit Steuern`].map(x=>`<div>${x}</div>`).join("");
+  $("hotel-check").innerHTML = [`Endpreis mit Steuern und Servicegebühr`, `Frühstück im Preis`, `Kostenlose Stornierung, bis die Flüge fest sind`].map(x=>`<div>${x}</div>`).join("");
 }
 
 function renderBudget(t){
@@ -417,7 +437,7 @@ function renderBudget(t){
   const total = flight + (villa||0);
   $("b-total").textContent = `${fmtEUR(total)} / ${fmtEUR(t.budget)}`;
   const v = $("b-verdict");
-  if(!villa){v.className="pill wait";v.textContent="Villa-Preis fehlt"}
+  if(!villa){v.className="pill wait";v.textContent="Preis Unterkunft fehlt"}
   else if(total<=t.budget){v.className="pill ok";v.textContent=`passt, ${fmtEUR(t.budget-total)} Luft`}
   else {v.className="pill bad";v.textContent=`${fmtEUR(total-t.budget)} über Budget`}
 }
@@ -429,10 +449,10 @@ async function askClaude(){
   const t=trip(); const rows=bestPartner(t);
   const prompt = `Du bist Reiseplaner für Prämienflüge und Villen. Antworte auf Deutsch, in kurzen ganzen Sätzen, ohne Aufzählungszeichen-Wüsten, höchstens 220 Wörter.
 Reise: ab ${t.origin} nach ${t.place} (Langstreckenziel ${t.hub}${t.final?", Anschluss "+t.final:""}), ${t.start} bis ${t.end}, ${t.nights} Nächte, ${t.pax} Personen, ${t.rt?"hin und zurück":"einfach"}.
-Budget gesamt: ${t.budget} € für Flug-Zuzahlung und Villa. Amex Membership Rewards (Business Platinum, Deutschland): ${$("f-points").value} Punkte.
+Budget gesamt: ${t.budget} € für Flug-Zuzahlung und Unterkunft. Amex Membership Rewards (Business Platinum, Deutschland): ${$("f-points").value} Punkte.
 Meilen-Tabelle (Startwerte des Nutzers, können abweichen): ${rows.map(r=>`${r.p}: ${r.milesZ} Meilen p.P. einfach Business, Umrechnung 1:${r.ratio}, Steuern ${r.taxZ} € p.P. einfach`).join("; ")}.
-Villa: privater Pool, mindestens ${$("f-sqm").value} m², ${$("f-beds").value} Schlafzimmer.
-Sag: 1) welches Meilenprogramm und welche Strecke am ehesten passt und warum, 2) welche Tabellenwerte du für zu optimistisch oder zu pessimistisch hältst, 3) in welchem Ortsteil der Region Pool-Villen dieser Größe am günstigsten sind und welcher Nachtpreis realistisch ist, 4) ob das Budget realistisch ist. Kennzeichne alles als Einschätzung ohne Live-Preise.`;
+Unterkunft: Pool-Villa (privater Pool, mindestens ${$("f-sqm").value} m², ${$("f-beds").value} Schlafzimmer), Gästehaus oder Hotel.
+Sag: 1) welches Meilenprogramm und welche Strecke am ehesten passt und warum, 2) welche Tabellenwerte du für zu optimistisch oder zu pessimistisch hältst, 3) in welchem Ortsteil der Region Pool-Villen, Gästehäuser und Hotels am günstigsten sind und welcher Nachtpreis je Art realistisch ist, 4) ob das Budget realistisch ist. Kennzeichne alles als Einschätzung ohne Live-Preise.`;
   btn.disabled=true; out.hidden=false; out.textContent="Claude denkt nach …";
   try{
     const r = await sample(prompt,{onText:({text})=>{out.textContent=text}});
