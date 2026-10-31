@@ -746,7 +746,7 @@ details.abschnitt>summary{min-height:44px;display:flex;align-items:center;cursor
 
 <div class="sr-only" role="status" aria-live="polite" id="ansage"></div>
 <script>
-window.MV_FASSUNG = "mv-2026-10-31-1453";
+window.MV_FASSUNG = "mv-2026-10-31-1521";
 /* ---- src/meilen.js ---- */
 /* Meilen und Villen – Amex-Punkte-Rechner (MV.meilen)
  * Besitzer: Agent "meilen". Daten aus plan/meilen-daten.json (Recherche-Stand 31.10.2026).
@@ -2397,7 +2397,7 @@ window.MV_FASSUNG = "mv-2026-10-31-1453";
   function guthabenLaden() {
     if (!hatSchluessel() || typeof MV.daten.guthaben !== 'function') return;
     Promise.resolve().then(function () { return MV.daten.guthaben(); }).then(function (g) {
-      S.guthaben = g && num(g.rest) ? g.rest : null; formAktualisieren();
+      S.guthaben = g && num(g.rest) ? g.rest : null; S.guthabenBis = g && g.bis || null; formAktualisieren();
     }, function (err) { console.error('Guthaben', err); });
   }
   function guthabenWarnung(art, a) {
@@ -2497,6 +2497,13 @@ window.MV_FASSUNG = "mv-2026-10-31-1453";
     if (!hatSchluessel()) { einrichtenZeigen(true); return; }
     S.demo = false; $('demo-band').hidden = true;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) { S.fehler = { art: 'offline' }; S.suche = s; renderAlles(); return; }
+    // Reicht das Guthaben sicher nicht, gar nicht erst suchen: Firecrawl zieht sonst Punkte ab und bricht mittendrin ab
+    var bedarf = kostenBereich(s.art, s.abflug);
+    if (num(S.guthaben) && S.guthaben < bedarf[0]) {
+      var bis = S.guthabenBis ? S.guthabenBis.split('-').reverse().join('.') : null;
+      S.fehler = { art: 'text', text: 'Das Firecrawl-Guthaben reicht für diese Suche nicht: noch ' + zahl(S.guthaben) + ' Punkte, gebraucht werden ca. ' + bedarf[0] + '–' + bedarf[1] + '. Mit dem Hobby-Plan auf firecrawl.dev geht es sofort weiter' + (bis ? ', sonst ab ' + bis + '.' : '.') };
+      S.suche = s; renderAlles(); guthabenLaden(); return;
+    }
     var token = ++S.lauf;
     S.suche = s; S.laden = { anteil: 0, schritte: [], start: Date.now(), ausfall: [] }; S.vorlaeufig = false; S.letzteAnsage = 0;
     if (abbruch) try { abbruch.abort(); } catch (e) { /* alt */ }
