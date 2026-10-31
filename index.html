@@ -589,6 +589,9 @@ details.abschnitt>summary{min-height:44px;display:flex;align-items:center;cursor
       <h2 id="t-einrichten">App noch nicht eingerichtet</h2>
       <p>Für echte Preise braucht die App einmalig einen Zugang zum Preisdienst. Öffne dafür auf diesem Gerät den Einrichtungslink, den du bekommen hast. Danach merkt sich die App den Zugang und du musst nie etwas eintippen.</p>
       <p class="leise">Auf dem iPhone: den Link in Safari öffnen und erst danach „Zum Home-Bildschirm“ wählen.</p>
+      <p class="leise">Oder den Claude-Zugang (beginnt mit „sk-ant-“) kopieren und hier einfügen:</p>
+      <button type="button" class="knopf-zweit" data-aktion="claude-einfuegen">Claude-Zugang einfügen</button>
+      <p class="leise" id="einrichten-claude-info" role="status"></p>
       <button type="button" class="knopf-zweit" id="knopf-beispiel" data-aktion="beispiel" hidden>Beispiel ansehen</button>
     </div>
   </section>
@@ -746,7 +749,7 @@ details.abschnitt>summary{min-height:44px;display:flex;align-items:center;cursor
 
 <div class="sr-only" role="status" aria-live="polite" id="ansage"></div>
 <script>
-window.MV_FASSUNG = "mv-2026-10-31-1521";
+window.MV_FASSUNG = "mv-2026-10-31-1614";
 /* ---- src/meilen.js ---- */
 /* Meilen und Villen – Amex-Punkte-Rechner (MV.meilen)
  * Besitzer: Agent "meilen". Daten aus plan/meilen-daten.json (Recherche-Stand 31.10.2026).
@@ -1129,6 +1132,239 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
   MV.meilen = { berechne: berechne, entfernung: entfernung, region: region, orte: ORTE, kurse: KURSE, stand: STAND };
 })();
 
+/* ---- src/claude.js ---- */
+/* Meilen und Villen – zweite Preisquelle: Claude (Anthropic-API) mit Websuche und Seitenabruf.
+   Liefert nur Unterkünfte (Hotels und Villen) über die Expedia-Hotelsuche; Flüge bleiben bei Firecrawl.
+   Geprüft 31.10.2026 mit web_fetch: Google Flights/Hotels, Kayak, Skyscanner, Trivago gesperrt oder leer,
+   Booking/Check24 nur JavaScript, HolidayCheck nicht erreichbar. Expedia liefert Gesamtpreise inkl. Steuern.
+   Schlüssel: nie im Code, nie im Protokoll. Einrichtung über #claude=<key> oder „Claude-Zugang einfügen“. */
+(function () {
+  'use strict';
+  var MV = window.MV = window.MV || {};
+  var API = 'https://api.anthropic.com/v1/messages';
+  var MODELL = 'claude-opus-5-5';
+  var LS_KEY = 'mv:ck', COOKIE = 'mv_ck', COOKIE_PFAD = '/meilen-und-villen/';
+  var RUNDE_MS = 300000, MAX_RUNDEN = 4;
+  var USD_EUR = 0.92; // nur für die Kostenanzeige („ca.“)
+
+  function lsGet(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } }
+  function lsSet(k, v) { try { window.localStorage.setItem(k, v); return true; } catch (e) { return false; } }
+  function lsDel(k) { try { window.localStorage.removeItem(k); } catch (e) { /* egal */ } }
+
+  // ---------------- Schlüssel ----------------
+  function gueltig(k) { return typeof k === 'string' && k.indexOf('sk-ant-') === 0 && k.length >= 40 && k.length <= 300 && /^[A-Za-z0-9_\-]+$/.test(k); }
+  function cookiePfad() {
+    var p = (window.location && location.pathname) || '/';
+    return p.indexOf(COOKIE_PFAD) === 0 ? COOKIE_PFAD : p.replace(/[^\/]*$/, '') || '/';
+  }
+  function cookieLesen() {
+    try { var m = document.cookie.match(/(?:^|;\s*)mv_ck=([^;]*)/); return m ? decodeURIComponent(m[1]) : null; } catch (e) { return null; }
+  }
+  // Wie beim Firecrawl-Zugang: Cookie nur als Brücke für „Zum Home-Bildschirm“ auf dem iPhone, kurzlebig, danach gelöscht.
+  function cookieSchreiben(wert) {
+    try {
+      document.cookie = COOKIE + '=' + encodeURIComponent(wert) + '; Path=' + cookiePfad() +
+        '; Max-Age=' + (wert ? 7 * 86400 : 0) + '; SameSite=Strict; Secure';
+    } catch (e) { /* Cookies gesperrt */ }
+  }
+  function standalone() {
+    try { return window.navigator.standalone === true || (!!window.matchMedia && window.matchMedia('(display-mode: standalone)').matches); } catch (e) { return false; }
+  }
+  function cookieAufraeumen() { if (standalone() && gueltig(lsGet(LS_KEY)) && cookieLesen()) cookieSchreiben(''); }
+  function setzen(k) {
+    k = String(k || '').trim();
+    if (!gueltig(k)) return false;
+    lsSet(LS_KEY, k); cookieSchreiben(k); cookieAufraeumen();
+    C.ungueltig = false;
+    return true;
+  }
+  function lesen() {
+    var k = lsGet(LS_KEY);
+    if (gueltig(k)) return k;
+    var c = cookieLesen();
+    if (gueltig(c)) { lsSet(LS_KEY, c); cookieAufraeumen(); return c; }
+    return null;
+  }
+  function loeschen() { lsDel(LS_KEY); cookieSchreiben(''); }
+  var wartend = null;
+  function melden(detail) { detail.claude = true; try { window.dispatchEvent(new CustomEvent('mv:schluessel', { detail: detail })); } catch (e) { /* alt */ } }
+  function ausHash() {
+    var h = (window.location && location.hash) || '';
+    var m = h.match(/^#claude=(.+)$/);
+    if (!m) return null;
+    var k; try { k = decodeURIComponent(m[1]); } catch (e) { k = m[1]; }
+    k = String(k || '').trim();
+    try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { try { location.hash = ''; } catch (e2) { /* egal */ } }
+    if (!gueltig(k)) { melden({ vorhanden: !!lesen(), neu: false, ungueltig: true }); return false; }
+    var alt = lesen();
+    if (alt === k) { melden({ vorhanden: true, neu: false, gleich: true }); return true; }
+    if (alt) { // fremden Schlüssel nie still überschreiben
+      wartend = k; C.einrichtungOffen = { neu: true };
+      melden({ vorhanden: true, neu: true, frage: true });
+      return null;
+    }
+    var ok = setzen(k);
+    melden({ vorhanden: ok, neu: true });
+    return ok;
+  }
+  function uebernehmen() {
+    if (!wartend) return false;
+    var ok = setzen(wartend); wartend = null; C.einrichtungOffen = null;
+    melden({ vorhanden: ok, neu: true });
+    return ok;
+  }
+  function verwerfen() { wartend = null; C.einrichtungOffen = null; }
+  // Knopf „Claude-Zugang einfügen“: liest die Zwischenablage (nur nach Tipp, der Browser fragt ggf. nach).
+  async function einfuegen() {
+    var t;
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.readText) return { ok: false, grund: 'Einfügen wird von diesem Browser nicht unterstützt.' };
+      t = await navigator.clipboard.readText();
+    } catch (e) { return { ok: false, grund: 'Die Zwischenablage durfte nicht gelesen werden.' }; }
+    t = String(t || '').trim();
+    if (t.indexOf('sk-ant-') !== 0) return { ok: false, grund: 'In der Zwischenablage ist kein Claude-Zugang (beginnt mit „sk-ant-“).' };
+    if (!gueltig(t)) return { ok: false, grund: 'Der Claude-Zugang in der Zwischenablage ist unvollständig.' };
+    var ok = setzen(t);
+    if (ok) melden({ vorhanden: true, neu: true });
+    return ok ? { ok: true } : { ok: false, grund: 'Speichern auf diesem Gerät nicht möglich.' };
+  }
+
+  // ---------------- Anfrage ----------------
+  function fehler(text, code) { var e = new Error(text); e.code = code; return e; }
+  function kurz(x) { return String((x && (x.message || x.type)) || x || '').slice(0, 200); }
+  function httpFehler(status, j) {
+    var m = j && j.error ? String(j.error.message || '') : '';
+    if (status === 401 || status === 403) { C.ungueltig = true; return fehler('Claude-Zugang ungültig. Bitte den Zugang neu einfügen.', 'claude_401'); }
+    if (status === 400 && /credit|billing|balance|guthaben|purchase|payment/i.test(m)) return fehler('Kein API-Guthaben bei Anthropic – bitte in console.anthropic.com aufladen.', 'claude_guthaben');
+    if (status === 429) return fehler('Claude bekommt gerade zu viele Anfragen. Bitte in einer Minute noch einmal suchen.', 'claude_ueberlastet');
+    if (status === 529 || status >= 500) return fehler('Claude ist gerade überlastet (Fehler ' + status + '). Bitte in ein paar Minuten noch einmal suchen.', 'claude_ueberlastet');
+    return fehler('Claude lehnt die Anfrage ab (Fehler ' + status + ')' + (m ? ': ' + m.slice(0, 160) : '.'), 'claude_' + status);
+  }
+  async function senden(body, signal) {
+    var key = lesen();
+    if (!key) throw fehler('Kein Claude-Zugang gespeichert.', 'kein_schluessel');
+    var ctrl = new AbortController(), zeitUm = false;
+    var t = setTimeout(function () { zeitUm = true; ctrl.abort(); }, RUNDE_MS);
+    var weiter = function () { ctrl.abort(); };
+    if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', weiter); }
+    var res, txt;
+    try {
+      res = await fetch(API, { method: 'POST', cache: 'no-store', signal: ctrl.signal, body: JSON.stringify(body),
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true', 'content-type': 'application/json' } });
+      txt = await res.text();
+    } catch (e) {
+      if (signal && signal.aborted) throw fehler('Suche abgebrochen.', 'abgebrochen');
+      if (zeitUm) throw fehler('Claude hat nicht innerhalb von 5 Minuten geantwortet. Bitte noch einmal suchen.', 'zeit');
+      throw fehler('Keine Verbindung zu Claude. Bitte die Internetverbindung prüfen.', 'netz');
+    } finally { clearTimeout(t); if (signal) signal.removeEventListener('abort', weiter); }
+    var j = null; try { j = JSON.parse(txt); } catch (e) { /* unten */ }
+    if (!res.ok) throw httpFehler(res.status, j);
+    if (!j || !Array.isArray(j.content)) throw fehler('Claude hat eine unlesbare Antwort geschickt.', 'format');
+    C.ungueltig = false;
+    return j;
+  }
+
+  // ---------------- Suchauftrag ----------------
+  function personen(s) {
+    var k = (s.kinderAlter || []).map(Number);
+    return { erw: Math.max(1, s.erwachsene || 1), kinder: k };
+  }
+  function expediaUrl(s, extra) {
+    var p = personen(s), u = 'https://www.expedia.de/Hotel-Search?destination=' + encodeURIComponent(s.ziel) +
+      '&startDate=' + s.hin + '&endDate=' + s.rueck + '&adults=' + p.erw;
+    if (p.kinder.length) u += '&children=' + encodeURIComponent(p.kinder.map(function (a) { return '1_' + a; }).join(','));
+    return u + (extra || '');
+  }
+  function auftrag(s) {
+    var p = personen(s), art = s.art || 'hotel', urls = [];
+    if (art !== 'villa') { urls.push(['Hotels, empfohlen', expediaUrl(s)]); urls.push(['Hotels, nach Preis', expediaUrl(s, '&sort=PRICE_LOW_TO_HIGH')]); }
+    if (art !== 'hotel') urls.push(['Ferienhäuser und Villen', expediaUrl(s, '&lodging=VACATION_RENTAL')]);
+    var wunsch = [];
+    if (art !== 'villa' && (s.sterne || []).length) wunsch.push('Hotels mit ' + s.sterne.join(' oder ') + ' Sternen');
+    var vp = { fruehstueck: 'mit Frühstück', halbpension: 'mit Halbpension', allinclusive: 'All Inclusive' }[s.verpflegung];
+    if (vp && art !== 'villa') wunsch.push('Verpflegung ' + vp + ' bevorzugt');
+    var v = s.villa || {};
+    if (art !== 'hotel' && v.schlafzimmer > 0) wunsch.push('Villen mit mindestens ' + v.schlafzimmer + ' Schlafzimmern');
+    if (art !== 'hotel' && v.privatpool) wunsch.push('Villen mit privatem Pool');
+    return 'Reise: ' + s.ziel + ', Anreise ' + s.hin + ', Abreise ' + s.rueck + ', ' + p.erw + ' Erwachsene' +
+      (p.kinder.length ? ', Kinder im Alter von ' + p.kinder.join(', ') : '') + '.\n' +
+      (wunsch.length ? 'Wünsche: ' + wunsch.join('; ') + '.\n' : '') +
+      '\nLade mit web_fetch genau diese Expedia-Suchseiten:\n' + urls.map(function (u, i) { return (i + 1) + '. ' + u[0] + ': ' + u[1]; }).join('\n') +
+      '\n\nNimm aus jeder Seite die Unterkünfte mit Preis (zusammen höchstens 20, die besten Bewertungen und die günstigsten zuerst). ' +
+      'Expedia nennt den Gesamtpreis für den ganzen Aufenthalt meist mit „inkl. Steuern & Gebühren“: genau diesen Betrag in preisGesamtAufenthalt übernehmen. ' +
+      'Steht nur ein Preis pro Nacht da, preisNacht setzen und preisGesamtAufenthalt null lassen. ' +
+      'Nur wenn eine Seite leer ist, darfst du web_search nutzen, um Expedia-Seiten (expedia.de) für dieses Ziel zu finden, und diese laden. ' +
+      'Jede Unterkunft bekommt im Feld anbieter genau den Eintrag „Expedia“ mit Betrag und der Expedia-Adresse der Unterkunft (oder der Suchseite, falls keine eigene Adresse sichtbar ist). ' +
+      'Note: die Gästebewertung wie angezeigt (Expedia: x/10). Bild: nur eine https-Bildadresse, die in der Seite steht, sonst null. ' +
+      'In geprueft jede geladene Seite mit ok=true/false eintragen. Gib für ziel Land (ISO-Code, klein) und ungefähre Koordinaten des Zielorts an, falls bekannt, sonst null.';
+  }
+  var SYSTEM = 'Du sammelst für eine private Reise-Vergleichs-App echte Live-Preise von Unterkünften. ' +
+    'Harte Regel: Übernimm nur Preise, die wörtlich auf einer Seite stehen, die du in diesem Lauf geladen hast, jeweils mit Quell-Adresse und Anbietername. ' +
+    'Nichts schätzen, nichts umrechnen, nichts erfinden. Fehlt ein Wert, setze null. Lieber weniger Treffer als ein erfundener. ' +
+    'Beträge als Zahl in Euro ohne Tausenderpunkt (1.234,50 € → 1234.5). Antworte am Ende nur mit dem JSON laut Schema.';
+
+  // Die API erlaubt höchstens 16 Felder mit null im Schema, darum nur die nötigen
+  function N(t) { return { type: [t, 'null'] }; }
+  function OBJ(props) { return { type: 'object', additionalProperties: false, required: Object.keys(props), properties: props }; }
+  var SCHEMA = OBJ({
+    ziel: OBJ({ name: { type: 'string' }, land: N('string'), lat: N('number'), lon: N('number') }),
+    unterkuenfte: { type: 'array', items: OBJ({
+      name: { type: 'string' }, typ: { type: 'string', enum: ['hotel', 'villa'] }, sterne: N('number'), note: N('number'), bewertungen: N('integer'),
+      bild: N('string'), ort: N('string'),
+      verpflegung: { anyOf: [{ type: 'string', enum: ['Frühstück', 'Halbpension', 'All Inclusive', 'ohne'] }, { type: 'null' }] },
+      stornierbar: N('boolean'), privatpool: N('boolean'), schlafzimmer: N('integer'),
+      preisGesamtAufenthalt: N('number'), preisNacht: N('number'),
+      anbieter: { type: 'array', items: OBJ({ name: { type: 'string' }, betragGesamt: N('number'), url: { type: 'string' } }) },
+      url: { type: 'string' }
+    }) },
+    geprueft: { type: 'array', items: OBJ({ name: { type: 'string' }, url: { type: 'string' }, ok: { type: 'boolean' } }) },
+    warnungen: { type: 'array', items: { type: 'string' } }
+  });
+
+  function kosten(u) {
+    if (!u) return 0;
+    var ein = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) * 1.25 + (u.cache_read_input_tokens || 0) * 0.1;
+    var such = (u.server_tool_use && u.server_tool_use.web_search_requests) || 0;
+    return (ein * 4 + (u.output_tokens || 0) * 20) / 1e6 + such * 0.01;
+  }
+  // Holt die Unterkünfte. Gibt {daten, kostenEuro, runden} zurück oder wirft einen Fehler mit code.
+  async function unterkuenfte(s, signal) {
+    var nachrichten = [{ role: 'user', content: auftrag(s) }];
+    var body = { model: MODELL, max_tokens: 16000, system: SYSTEM, messages: nachrichten,
+      output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
+      tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }, { type: 'web_fetch_20260209', name: 'web_fetch', max_uses: 6 }] };
+    var usd = 0, j = null;
+    for (var runde = 1; runde <= MAX_RUNDEN; runde++) {
+      j = await senden(body, signal);
+      usd += kosten(j.usage);
+      if (j.stop_reason !== 'pause_turn') break;
+      // Server-Werkzeuge haben pausiert: Antwort unverändert anhängen und weiterlaufen lassen
+      body.messages = nachrichten.concat([{ role: 'assistant', content: j.content }]);
+    }
+    var eur = Math.round(usd * USD_EUR * 100) / 100;
+    if (j.stop_reason === 'pause_turn') throw Object.assign(fehler('Claude ist nach ' + MAX_RUNDEN + ' Runden nicht fertig geworden.', 'claude_unfertig'), { kostenEuro: eur });
+    if (j.stop_reason === 'refusal') throw Object.assign(fehler('Claude hat die Suche abgelehnt.', 'claude_abgelehnt'), { kostenEuro: eur });
+    if (j.stop_reason === 'max_tokens') throw Object.assign(fehler('Claudes Antwort war zu lang und wurde abgeschnitten.', 'claude_format'), { kostenEuro: eur });
+    var txt = j.content.filter(function (b) { return b.type === 'text'; }).map(function (b) { return b.text; }).join('');
+    var daten = null; try { daten = JSON.parse(txt); } catch (e) { /* unten */ }
+    if (!daten || !Array.isArray(daten.unterkuenfte)) throw Object.assign(fehler('Claude hat keine lesbare Liste geschickt.', 'claude_format'), { kostenEuro: eur });
+    return { daten: daten, kostenEuro: eur };
+  }
+
+  var C = MV.claude = {
+    version: '2026-10-31',
+    schluessel: function () { return { vorhanden: !!lesen(), ungueltig: !!C.ungueltig }; },
+    setzen: setzen, loeschen: loeschen, einfuegen: einfuegen, uebernehmen: uebernehmen, verwerfen: verwerfen,
+    unterkuenfte: unterkuenfte,
+    kostenText: 'ca. 0,50–1,50 € API-Kosten',
+    ungueltig: false, einrichtungOffen: null,
+    _intern: { gueltig: gueltig, auftrag: auftrag, SCHEMA: SCHEMA, kosten: kosten, expediaUrl: expediaUrl }
+  };
+  C.eingerichtet = ausHash();
+  cookieAufraeumen();
+  try { window.addEventListener('hashchange', function () { ausHash(); }); } catch (e) { /* alt */ }
+})();
+
 /* ---- src/daten.js ---- */
 /* Meilen und Villen – Datenschicht (src/daten.js)
  * Besitzer: Agent "daten". Vertrag: plan/bauplan.md (MV.daten, Posten, Ergebnis, Flug, Unterkunft, Paket).
@@ -1442,13 +1678,13 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
   }
 
   // ---------------- Ziel auflösen ----------------
-  async function zielAufloesen(s, lauf) {
+  async function zielAufloesen(s, lauf, nurFlug) {
     var schl = norm(s.ziel), orte = jsonGet('mv:orte') || {};
     var o = Object.assign({}, BEKANNT[schl] || {}, orte[schl] || {});
-    var mitVilla = s.art === 'villa' || s.art === 'beides';
+    var mitVilla = !nurFlug && (s.art === 'villa' || s.art === 'beides');
     var auf = [], wo = {};
     if (!o.flug) { wo.flug = auf.length; auf.push(aufruf('flights-google-com', 'flights/suggest_places', { query: s.ziel })); }
-    if (!o.booking) { wo.booking = auf.length; auf.push(aufruf('booking-com', 'hotels/locations', { query: s.ziel })); }
+    if (!o.booking && !nurFlug) { wo.booking = auf.length; auf.push(aufruf('booking-com', 'hotels/locations', { query: s.ziel })); }
     if (mitVilla && !o.vrbo) { wo.vrbo = auf.length; auf.push(aufruf('vrbo-com', 'vacation-rentals/locations', { query: s.ziel })); }
     if (auf.length) {
       lauf.melde('ziel', 'Ziel „' + s.ziel + '“ wird gesucht …', 0.03);
@@ -2013,6 +2249,107 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     return e;
   }
 
+  // ---------------- Unterkünfte über Claude (Expedia-Hotelsuche) ----------------
+  // Claude liest die Expedia-Seiten selbst (MV.claude); hier wird nur übernommen, was als Zahl mit Quelle kommt.
+  function claudeDa() { try { return !!(MV.claude && MV.claude.schluessel().vorhanden); } catch (e) { return false; } }
+  function httpsUrl(u) { u = String(u || '').trim(); return /^https:\/\/[^\s"'<>]+$/i.test(u) ? u : null; }
+  function koord(lat, lon) { return typeof lat === 'number' && typeof lon === 'number' && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && (lat || lon) ? { lat: lat, lon: lon } : null; }
+  function claudeUnterkunftRoh(x, s, zeit) {
+    if (!x || !x.name) return null;
+    var n = naechte(s);
+    var an = (x.anbieter || []).map(function (a) {
+      var b = a.betragGesamt > 0 ? r2(a.betragGesamt) : a.betragNacht > 0 ? r2(a.betragNacht * n) : null, url = httpsUrl(a.url) || httpsUrl(x.url), name = String(a.name || '').trim().slice(0, 40);
+      return b && url && name ? { name: name, betrag: b, url: url, art: 'live', zeit: zeit, vergleichbar: true,
+        text: a.betragGesamt > 0 ? 'Aufenthalt gesamt laut ' + name : eur(a.betragNacht) + ' pro Nacht × ' + n + ' Nächte laut ' + name } : null;
+    }).filter(Boolean).sort(function (a, b) { return a.betrag - b.betrag; });
+    var proNacht = !(x.preisGesamtAufenthalt > 0) && x.preisNacht > 0;
+    var gesamt = x.preisGesamtAufenthalt > 0 ? r2(x.preisGesamtAufenthalt) : proNacht ? r2(x.preisNacht * n) : null;
+    if (an.length && (gesamt == null || an[0].betrag < gesamt)) { gesamt = an[0].betrag; proNacht = /pro Nacht/.test(an[0].text); }
+    if (!(gesamt > 0)) return null;
+    var url = an.length ? an[0].url : httpsUrl(x.url), quelle = an.length ? an[0].name : 'Expedia';
+    if (!url) return null;
+    if (!an.length) an = [{ name: quelle, betrag: gesamt, url: url, art: 'live', zeit: zeit, vergleichbar: true, text: 'Aufenthalt gesamt laut ' + quelle }];
+    var k = koord(x.lat, x.lon), note = x.note > 0 && x.note <= 10 ? Math.round(x.note * 10) / 10 : null;
+    return {
+      id: 'cx-' + norm(x.name).replace(/ /g, '-').slice(0, 60), typ: x.typ === 'villa' ? 'villa' : 'hotel', name: String(x.name).slice(0, 120), bild: httpsUrl(x.bild),
+      sterne: x.sterne > 0 && x.sterne <= 5 ? x.sterne : null, note: note, notenWort: null, bewertungen: x.bewertungen > 0 ? x.bewertungen : 0,
+      ort: x.ort ? String(x.ort).slice(0, 80) : null, entfernung: null, verpflegung: x.verpflegung || null, zimmer: null,
+      schlafzimmer: x.schlafzimmer > 0 ? x.schlafzimmer : null, privatpool: x.privatpool === true ? true : null,
+      stornierbar: x.stornierbar === true ? true : x.stornierbar === false ? false : null,
+      preis: posten(gesamt, 'live', quelle, zeit, n + ' Nächte' + (proNacht ? ' (Preis pro Nacht × ' + n + ')' : ', Gesamtpreis Aufenthalt') +
+        (x.preisText ? ', laut ' + quelle + ': „' + String(x.preisText).slice(0, 80) + '“' : '') + ', von Claude gelesen'),
+      vorOrt: [], preisNacht: r2(gesamt / n), anbieter: an, buchenUrl: url,
+      lat: k ? k.lat : null, lon: k ? k.lon : null, ortUngenau: !k,
+      hinweise: ['Kurtaxe und Gebühren vor Ort: bei ' + quelle + ' keine Angabe.'], gesponsert: false,
+      vergleich: an.length > 1 ? 'mehrere' : 'nur-einer', _zeit: zeit
+    };
+  }
+  var claudeUnterkunft = sicher(function () { return claudeUnterkunftRoh.apply(null, arguments); });
+  function claudeUebernehmen(d, s, lauf) {
+    var zeit = Date.now(), gesehen = {}, art = s.art || 'hotel', v = s.villa || {}, hotels = [], villen = [];
+    (d.unterkuenfte || []).forEach(function (x) {
+      var u = claudeUnterkunft(x, s, zeit);
+      if (!u || gesehen[u.id]) return;
+      gesehen[u.id] = 1;
+      if (u.typ === 'villa') {
+        if (art === 'hotel' || (v.privatpool && u.privatpool === false) || (v.schlafzimmer > 0 && u.schlafzimmer != null && u.schlafzimmer < v.schlafzimmer)) return;
+        villen.push(u);
+      } else {
+        if (art === 'villa' || ((s.sterne || []).length && u.sterne != null && s.sterne.indexOf(Math.floor(u.sterne)) < 0)) return;
+        hotels.push(u);
+      }
+    });
+    lauf.hotels = hotels; lauf.villen = villen;
+    var anz = hotels.length + villen.length;
+    lauf.quelle('Expedia (über Claude)', anz, anz ? null : 'keine Unterkunft mit Preis gefunden');
+    var weg = (d.geprueft || []).filter(function (g) { return g && !g.ok; }).map(function (g) { return String(g.name || g.url || '').slice(0, 60); });
+    if (weg.length) lauf.warnungen.push('Nicht erreichbar oder ohne Preise: ' + weg.join(', ') + '.');
+    (d.warnungen || []).slice(0, 3).forEach(function (w) { if (w) lauf.warnungen.push('Claude: ' + String(w).slice(0, 200)); });
+    if (!anz) lauf.warnungen.push('Claude hat bei Expedia keine passende Unterkunft mit Preis gefunden.');
+  }
+  // Flüge über Firecrawl (nur Google Flights), Unterkünfte über Claude, beides gleichzeitig.
+  async function claudeSuche(s, lauf, opt, ctrl, setzeZiel) {
+    lauf.vergleich = 0; // Agoda-Abgleich entfällt
+    var fc = new AbortController(), ziel = null, kostenEuro;
+    ctrl.signal.addEventListener('abort', function () { fc.abort(); });
+    lauf.signal = fc.signal; lauf.abbrechen = function () { fc.abort(); }; // Firecrawl-Abbruch stoppt Claude nicht
+    var ohneF = opt.ohneFluege || (!schluesselLesen() ? 'Flugpreise brauchen den Firecrawl-Zugang (Einrichtungslink öffnen).' : null);
+    var flugTeil;
+    if (ohneF) { lauf.quelle('Google Flights', 0, ohneF); lauf.warnungen.push(ohneF); flugTeil = Promise.resolve(); }
+    else flugTeil = (async function () {
+      var z = await zielAufloesen(s, lauf, true);
+      ziel = z; setzeZiel(z);
+      await flugKette(s, z, lauf);
+    })().catch(function (err) {
+      if (ctrl.signal.aborted) throw err;
+      if (fc.signal.aborted && err.code === 'abgebrochen') return; // Claude-Fehler hat die Flugsuche gestoppt
+      var t = err.code === 'http_402' ? 'Flugpreise erst wieder mit Firecrawl-Guthaben (' + (opt.guthabenBis ? 'ab ' + datumDe(opt.guthabenBis) : 'neuer Abrechnungszeitraum') + ' oder Hobby-Plan).' : 'Flüge: ' + err.message;
+      lauf.warnungen.push(t);
+      if (!lauf.quellen.some(function (q) { return q.name === 'Google Flights'; })) lauf.quelle('Google Flights', 0, t);
+    });
+    var start = Date.now();
+    lauf.melde('hotels', 'Claude sucht Unterkünfte bei Expedia … das dauert 1–3 Minuten', 0.05);
+    var uhr = setInterval(function () {
+      var sek = (Date.now() - start) / 1000;
+      lauf.melde('hotels', 'Claude liest Hotels und Villen mit Gesamtpreis (' + Math.round(sek) + ' s, meist 1–3 Minuten) …', Math.min(0.9, 0.05 + sek / 150 * 0.85));
+    }, 4000);
+    var cl = MV.claude.unterkuenfte(s, ctrl.signal).then(function (r) { return { ok: true, r: r }; }, function (e) { fc.abort(); return { ok: false, e: e }; }); // ohne Unterkünfte keine Flug-Punkte mehr ausgeben
+    var res;
+    try { res = await Promise.all([cl, flugTeil]); } finally { clearInterval(uhr); }
+    var c = res[0];
+    if (!c.ok) {
+      throw c.e; // ohne Unterkünfte kein brauchbares Ergebnis: Meldung mit „Erneut versuchen“ zeigen
+    } else { kostenEuro = c.r.kostenEuro; claudeUebernehmen(c.r.daten, s, lauf); }
+    var zc = (c.ok && c.r.daten.ziel) || {}, k = koord(zc.lat, zc.lon), land = /^[a-z]{2}$/i.test(zc.land || '') ? zc.land.toLowerCase() : null;
+    if (!ziel) ziel = { name: s.ziel, flughafen: null, land: land, lat: k ? k.lat : null, lon: k ? k.lon : null, _flugZiel: null, _booking: null, _vrbo: null };
+    else {
+      if (k && !ziel._booking) { ziel.lat = k.lat; ziel.lon = k.lon; } // Ortsmitte statt Flughafen für die Transferschätzung
+      if (!ziel.land && land) ziel.land = land;
+    }
+    setzeZiel(ziel);
+    return { ziel: ziel, kostenEuro: kostenEuro };
+  }
+
   // ---------------- Suche ----------------
   function sucheNormal(s) {
     var o = Object.assign({ erwachsene: 2, kinderAlter: [], art: 'hotel', sterne: [], verpflegung: 'egal', villa: {}, abflug: ['FRA'], maxUmstiege: 1, budget: 0 }, s || {});
@@ -2040,7 +2377,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     if (!vollstaendig(e)) { try { localStorage.removeItem(k); } catch (x) {} return null; } // Altlast aus früherem Stand: neu suchen
     var min = Math.round((Date.now() - e.zeit) / 60000);
     e.kostenPunkte = 0; e.ausCache = true;
-    e.warnungen = ['Gleiche Suche vor ' + min + ' Min.: Ergebnis aus dem Zwischenspeicher, keine Punkte verbraucht.'].concat(e.warnungen || []);
+    if (e.dienst === 'claude') e.kostenEuro = 0;
+    e.warnungen = ['Gleiche Suche vor ' + min + ' Min.: Ergebnis aus dem Zwischenspeicher, ' + (e.dienst === 'claude' ? 'keine neuen Kosten.' : 'keine Punkte verbraucht.')].concat(e.warnungen || []);
     return e;
   }
   function cacheSchreiben(k, e) {
@@ -2052,8 +2390,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
   }
 
   async function suchen(sucheRoh, fortschritt, optionen) {
-    var s = sucheNormal(sucheRoh), opt = optionen || {};
-    var ck = cacheSchluessel(s, opt);
+    var s = sucheNormal(sucheRoh), opt = optionen || {}, mitClaude = claudeDa();
+    var ck = cacheSchluessel(s, opt) + (mitClaude ? ':c' + (opt.ohneFluege ? '0' : '') : '');
     if (!opt.neu) { var c = cacheLesen(ck); if (c) { if (fortschritt) try { fortschritt({ schritt: 'fertig', text: 'Aus dem Zwischenspeicher', anteil: 1, teil: c }); } catch (e) { /* UI */ } return c; } }
     var ziel = null;
     var ctrl = new AbortController(), aussen = opt.signal || null;
@@ -2068,14 +2406,22 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
         try { if (ziel && schritt !== 'ziel') teil = ohneIntern(ergebnisBauen(lauf, s, ziel, false)); } catch (e) { teil = null; }
         try { fortschritt({ schritt: schritt, text: text, anteil: anteil, teil: teil }); } catch (e) { /* Fehler der Oberfläche nicht in die Suche tragen */ }
       } };
+    if (mitClaude) {
+      var cr = await claudeSuche(s, lauf, opt, ctrl, function (z) { ziel = z; });
+      return abschluss(lauf, s, cr.ziel, ck, fortschritt, cr);
+    }
     ziel = await zielAufloesen(s, lauf);
     lauf.zeit = Date.now();
     try { await Promise.all([flugKette(s, ziel, lauf), unterkuenfte(s, ziel, lauf)]); }
     catch (err) { ctrl.abort(); throw err; } // auch bei anderen Fehlern keine Abrufe weiterlaufen lassen
+    return abschluss(lauf, s, ziel, ck, fortschritt, null);
+  }
+  async function abschluss(lauf, s, ziel, ck, fortschritt, claude) {
     var e = ergebnisBauen(lauf, s, ziel, true);
     e.business = await businessBauen(lauf, s, ziel, e.pakete);
     e.kostenPunkte = lauf.kosten; e.warnungen = lauf.warnungen.slice();
-    if (!e.pakete.bestes) e.warnungen.push(!lauf.einfach.length ? 'Ohne Flug kein Gesamtpaket.' : !(lauf.hotels.length + lauf.villen.length) ? 'Noch keine passende Unterkunft gefunden.' :
+    if (claude) { e.dienst = 'claude'; e.kostenEuro = claude.kostenEuro; }
+    if (!e.pakete.bestes) e.warnungen.push(!lauf.einfach.length ? (claude && (lauf.hotels.length + lauf.villen.length) ? 'Ohne Flugpreise kein Gesamtpaket: die Unterkünfte stehen unten mit Gesamtpreis für den Aufenthalt.' : 'Ohne Flug kein Gesamtpaket.') : !(lauf.hotels.length + lauf.villen.length) ? 'Noch keine passende Unterkunft gefunden.' :
       'Kein Paket liegt unter ' + eur0(s.budget * 1.1) + ' (Budget + 10 %). Günstigste Variante liegt bei ' + eur0(e.pakete.guenstigsterPreis) + '.');
     e = ohneIntern(e);
     // Nur vollständige Ergebnisse merken: sonst bliebe ein Ausfall 15 Minuten lang „eingefroren“.
@@ -2092,14 +2438,14 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
   MV.daten = {
     version: '2026-10-31',
     suchen: suchen,
-    schluessel: function () { return { vorhanden: !!schluesselLesen() }; },
+    schluessel: function () { var f = !!schluesselLesen(), c = claudeDa(); return { vorhanden: f || c, firecrawl: f, claude: c }; },
     schluesselSetzen: schluesselSetzen,
     schluesselLoeschen: schluesselLoeschen,
     schluesselUebernehmen: schluesselUebernehmen,
     schluesselVerwerfen: schluesselVerwerfen,
     guthaben: guthaben,
     cacheLeeren: function () { (jsonGet('mv:suchen') || []).forEach(lsDel); lsDel('mv:suchen'); },
-    _intern: { sucheNormal: sucheNormal, km: km, personen: personen, bookingUnterkunft: bookingUnterkunft, vrboUnterkunft: vrboUnterkunft, paketBauen: paketBauen, cacheSchluessel: cacheSchluessel, flugZielWaehlen: flugZielWaehlen, businessBauen: businessBauen, flugLink: flugLink, cacheLesen: cacheLesen }
+    _intern: { sucheNormal: sucheNormal, km: km, personen: personen, bookingUnterkunft: bookingUnterkunft, vrboUnterkunft: vrboUnterkunft, paketBauen: paketBauen, cacheSchluessel: cacheSchluessel, flugZielWaehlen: flugZielWaehlen, businessBauen: businessBauen, flugLink: flugLink, cacheLesen: cacheLesen, claudeUnterkunft: claudeUnterkunft }
   };
   MV.daten.einrichtungOffen = null;
   MV.daten.eingerichtet = einrichtenAusHash();
@@ -2382,20 +2728,24 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     $('h-rueck').textContent = num(n) && n > 0 ? tagLang($('f-rueck').value) + ' · ' + n + (n === 1 ? ' Nacht' : ' Nächte') : tagLang($('f-rueck').value);
     var a = abflugListe();
     $('abflug-text').textContent = 'Abflug ab ' + (a.length === ALLE_ABFLUG.length ? 'allen 6 Flughäfen (' + a.join(', ') + ')' : a.join(', ')) + ', höchstens 1 Umstieg.';
-    $('such-kosten').textContent = hatDaten() && hatSchluessel() ? 'Eine Suche kostet ca. ' + kostenSchaetzung(art, a) + ' Firecrawl-Punkte' + (num(S.guthaben) ? ', Guthaben ' + zahl(S.guthaben) + '.' : '.') : '';
+    $('such-kosten').textContent = !(hatDaten() && hatSchluessel()) ? '' : claudeAktiv() ?
+      (firecrawlDa() ? 'Flüge ca. ' + kostenSchaetzung(art, a) + ' Firecrawl-Punkte' + (num(S.guthaben) ? ' (Guthaben ' + zahl(S.guthaben) + ')' : '') + ', ' : 'Flugpreise erst mit Firecrawl-Zugang. ') +
+        'Unterkünfte über Claude ' + MV.claude.kostenText + ', Dauer 1–3 Minuten.' :
+      'Eine Suche kostet ca. ' + kostenSchaetzung(art, a) + ' Firecrawl-Punkte' + (num(S.guthaben) ? ', Guthaben ' + zahl(S.guthaben) + '.' : '.');
     guthabenWarnung(art, a);
   }
   function vergleichAn() { return roh('vergleich') !== 'aus'; }
   /* Schätzung laut Datenschicht: 5 je Abflughafen, 5 Hotels, 10 Villen, 10 Rückflug, 10 Business, 5 Preissuche, Portalvergleich 20–50 */
   function kostenBereich(art, abflug, vergleich) {
     var n = (abflug || abflugListe()).length * 5 + 10 + 10;
+    if (claudeAktiv()) return [n, n + 5]; // Unterkünfte kommen über Claude, Firecrawl nur noch für Flüge
     if (art !== 'villa') n += 5; if (art !== 'hotel') n += 10;
     var mitV = (vergleich == null ? vergleichAn() : vergleich) && art !== 'villa';
     return mitV ? [n + 20, n + 55] : [n, n + 5];
   }
   function kostenSchaetzung(art, abflug, vergleich) { var k = kostenBereich(art, abflug, vergleich); return k[0] + '–' + k[1]; }
   function guthabenLaden() {
-    if (!hatSchluessel() || typeof MV.daten.guthaben !== 'function') return;
+    if (!firecrawlDa() || typeof MV.daten.guthaben !== 'function') return;
     Promise.resolve().then(function () { return MV.daten.guthaben(); }).then(function (g) {
       S.guthaben = g && num(g.rest) ? g.rest : null; S.guthabenBis = g && g.bis || null; formAktualisieren();
     }, function (err) { console.error('Guthaben', err); });
@@ -2404,6 +2754,13 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     var el = $('guthaben-warnung'); if (!el) return;
     var k = kostenBereich(art, a);
     if (!num(S.guthaben) || S.guthaben >= k[1]) { el.hidden = true; el.innerHTML = ''; return; }
+    if (claudeAktiv()) {
+      var fr = kostenBereich(art, ['FRA']);
+      el.hidden = false;
+      el.innerHTML = '<p><strong>' + (S.guthaben < k[0] ? 'Flugpreise erst wieder mit Firecrawl-Guthaben' + flugGuthabenText() + '.' : 'Das Firecrawl-Guthaben reicht für die Flüge vielleicht nicht.') + '</strong> Noch ' + zahl(S.guthaben) + ' Punkte, die Flüge brauchen ca. ' + k[0] + '–' + k[1] + '. Unterkünfte kommen trotzdem über Claude.</p>' +
+        (a.length > 1 && fr[1] < k[1] ? '<div class="knopf-reihe"><button type="button" class="knopf-klein" data-aktion="nur-fra">Nur ab FRA suchen (ca. ' + fr[0] + '–' + fr[1] + ' Punkte)</button></div>' : '');
+      return;
+    }
     var fra = kostenBereich(art, ['FRA']), ohneV = kostenBereich(art, a, false), kn = [];
     if (a.length > 1 && fra[1] < k[1]) kn.push('<button type="button" class="knopf-klein" data-aktion="nur-fra">Nur ab FRA suchen (ca. ' + fra[0] + '–' + fra[1] + ' Punkte)</button>');
     if (vergleichAn() && art !== 'villa' && ohneV[1] < k[1]) kn.push('<button type="button" class="knopf-klein" data-aktion="vergleich-aus">Portalvergleich aus (ca. ' + ohneV[0] + '–' + ohneV[1] + ' Punkte)</button>');
@@ -2477,6 +2834,10 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
   /* ---------- Suche ---------- */
   function hatDaten() { return !!(MV.daten && typeof MV.daten.suchen === 'function'); }
   function hatSchluessel() { try { return hatDaten() && (typeof MV.daten.schluessel !== 'function' || !!MV.daten.schluessel().vorhanden); } catch (e) { return false; } }
+  /* Mit Claude-Zugang: Unterkünfte über Claude (Expedia), Firecrawl nur noch für Flüge */
+  function claudeAktiv() { try { return !!(MV.claude && MV.claude.schluessel().vorhanden); } catch (e) { return false; } }
+  function firecrawlDa() { try { var k = MV.daten.schluessel(); return k.firecrawl != null ? !!k.firecrawl : !!k.vorhanden; } catch (e) { return false; } }
+  function flugGuthabenText() { return ' (' + (S.guthabenBis ? 'ab ' + S.guthabenBis.split('-').reverse().join('.') : 'neuer Abrechnungszeitraum') + ' oder Hobby-Plan)'; }
   function beispiel() {
     var b = MV.beispiel; if (!b) return null;
     try { if (typeof b === 'function') b = b(); } catch (e) { return null; }
@@ -2498,8 +2859,9 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     S.demo = false; $('demo-band').hidden = true;
     if (typeof navigator !== 'undefined' && navigator.onLine === false) { S.fehler = { art: 'offline' }; S.suche = s; renderAlles(); return; }
     // Reicht das Guthaben sicher nicht, gar nicht erst suchen: Firecrawl zieht sonst Punkte ab und bricht mittendrin ab
-    var bedarf = kostenBereich(s.art, s.abflug);
-    if (num(S.guthaben) && S.guthaben < bedarf[0]) {
+    var bedarf = kostenBereich(s.art, s.abflug), ohneFluege = null;
+    if (claudeAktiv()) { if (firecrawlDa() && num(S.guthaben) && S.guthaben < bedarf[0]) ohneFluege = 'Flugpreise erst wieder mit Firecrawl-Guthaben' + flugGuthabenText() + '.'; }
+    else if (num(S.guthaben) && S.guthaben < bedarf[0]) {
       var bis = S.guthabenBis ? S.guthabenBis.split('-').reverse().join('.') : null;
       S.fehler = { art: 'text', text: 'Das Firecrawl-Guthaben reicht für diese Suche nicht: noch ' + zahl(S.guthaben) + ' Punkte, gebraucht werden ca. ' + bedarf[0] + '–' + bedarf[1] + '. Mit dem Hobby-Plan auf firecrawl.dev geht es sofort weiter' + (bis ? ', sonst ab ' + bis + '.' : '.') };
       S.suche = s; renderAlles(); guthabenLaden(); return;
@@ -2513,7 +2875,7 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     ansage('Suche gestartet.');
     renderAlles(); window.scrollTo(0, 0);
     var p;
-    try { p = MV.daten.suchen(s, function (x) { if (token === S.lauf) fortschritt(x); }, { neu: !!neu, signal: abbruch ? abbruch.signal : null, anbieterVergleich: vergleichAn() }); } catch (err) { p = Promise.reject(err); }
+    try { p = MV.daten.suchen(s, function (x) { if (token === S.lauf) fortschritt(x); }, { neu: !!neu, signal: abbruch ? abbruch.signal : null, anbieterVergleich: vergleichAn(), ohneFluege: ohneFluege, guthabenBis: S.guthabenBis || null }); } catch (err) { p = Promise.reject(err); }
     Promise.resolve(p).then(function (erg) {
       if (token !== S.lauf) return;
       S.laden = null;
@@ -2529,6 +2891,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
       if (code === 'abgebrochen' || (err && err.name === 'AbortError')) { vorherZurueck(); renderAlles(); return; }
       if (!S.paket) { S.erg = null; vorherZurueck(); }
       if (navigator.onLine === false || code === 'netz' || (err && err.name === 'TypeError' && !code) || /failed to fetch|networkerror|load failed/i.test(t)) S.fehler = { art: 'offline' };
+      else if (code === 'claude_401') S.fehler = { art: 'zugang', claude: true };
+      else if (/^claude_/.test(code) && err.message) S.fehler = { art: 'text', text: err.message };
       else if ((code === 'http_401' || code === 'http_403') && hatSchluessel()) { S.zugangUngueltig = true; S.fehler = { art: 'zugang' }; }
       else if (code === 'kein_schluessel' || code === 'http_401' || code === 'http_403') { S.fehler = null; if (!S.erg) { einrichtenZeigen(true); return; } S.fehler = { art: 'text', text: err.message }; }
       else if (code === 'ziel_unbekannt' || (/ziel/i.test(t) && /unbekannt/i.test(t))) S.fehler = { art: 'ziel', eingabe: s.ziel, vorschlaege: (err && err.vorschlaege) || [] };
@@ -2636,8 +3000,9 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     }
     if (S.fehler) {
       var f = S.fehler, alt = S.erg && num(S.erg.zeit) ? uhrzeit(S.erg.zeit) : null;
-      if (f.art === 'zugang') h += '<div class="meldung meldung-bad" role="alert"><p><strong>Zugang abgelehnt</strong> – der gespeicherte Firecrawl-Zugang gilt nicht mehr. Bitte den neuen Einrichtungslink öffnen.</p></div>';
-      if (f.art === 'offline') h += '<div class="meldung meldung-bad" role="alert"><p><strong>Keine Verbindung zu Firecrawl.</strong> Bitte die Internetverbindung prüfen.' + (alt ? ' Die letzten Ergebnisse von ' + alt + ' Uhr bleiben sichtbar.' : '') + '</p><button type="button" class="knopf-klein" data-aktion="neu-laden">Erneut versuchen</button></div>';
+      if (f.art === 'zugang') h += f.claude ? '<div class="meldung meldung-bad" role="alert"><p><strong>Claude-Zugang ungültig.</strong> Bitte den Zugang neu kopieren und unter Einstellungen „Claude-Zugang einfügen“ tippen.</p><button type="button" class="knopf-klein" data-aktion="einstellungen">Einstellungen öffnen</button></div>' :
+        '<div class="meldung meldung-bad" role="alert"><p><strong>Zugang abgelehnt</strong> – der gespeicherte Firecrawl-Zugang gilt nicht mehr. Bitte den neuen Einrichtungslink öffnen.</p></div>';
+      if (f.art === 'offline') h += '<div class="meldung meldung-bad" role="alert"><p><strong>Keine Verbindung zum Preisdienst' + (claudeAktiv() ? ' (Claude)' : ' (Firecrawl)') + '.</strong> Bitte die Internetverbindung prüfen.' + (alt ? ' Die letzten Ergebnisse von ' + alt + ' Uhr bleiben sichtbar.' : '') + '</p><button type="button" class="knopf-klein" data-aktion="neu-laden">Erneut versuchen</button></div>';
       else if (f.art === 'ziel') h += '<div class="meldung meldung-warn" role="alert"><p>Wir kennen ‚' + esc(f.eingabe) + '‘ nicht.' + (f.vorschlaege.length ? ' Meinst du …' : ' Probier den Flughafen-Code am Ziel (zum Beispiel DPS).') + '</p>' +
         (f.vorschlaege.length ? '<div class="knopf-reihe">' + f.vorschlaege.slice(0, 3).map(function (v) { return '<button type="button" class="knopf-klein" data-aktion="ziel-vorschlag" data-wert="' + esc(v) + '">' + esc(v) + '</button>'; }).join('') + '</div>' :
           '<button type="button" class="knopf-klein" data-aktion="suche-aendern">Ziel ändern</button>') + '</div>';
@@ -2982,7 +3347,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
   function renderFussnote() {
     var e = S.erg, w = (e && e.warnungen) || [], extra = '';
     if (w.length) extra += '<ul>' + w.map(function (x) { return '<li>' + esc(x) + '</li>'; }).join('') + '</ul>';
-    if (e && num(e.kostenPunkte) && !S.demo) extra += '<p>Diese Suche hat ' + zahl(e.kostenPunkte) + ' Firecrawl-Punkte gekostet.</p>';
+    if (e && e.dienst === 'claude' && !S.demo) extra += '<p>Diese Suche hat ' + (num(e.kostenPunkte) ? zahl(e.kostenPunkte) + ' Firecrawl-Punkte (Flüge) und ' : '') + 'ca. ' + euro2(e.kostenEuro) + ' API-Kosten bei Anthropic (Unterkünfte) gekostet.</p>';
+    else if (e && num(e.kostenPunkte) && !S.demo) extra += '<p>Diese Suche hat ' + zahl(e.kostenPunkte) + ' Firecrawl-Punkte gekostet.</p>';
     $('fussnote-extra').innerHTML = extra;
   }
 
@@ -3216,8 +3582,15 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     var spanne = !num(o.mrGesamt) ? ' (gerechnet mit dem oberen Wert der Spanne)' : '';
     return st >= b ? '<span class="reicht ja">Dein Stand: ' + zahl(st) + ' Punkte → reicht, ' + zahl(st - b) + ' bleiben übrig' + spanne + '.</span>' : '<span class="reicht nein">Es fehlen ' + zahl(b - st) + ' Punkte' + spanne + '.</span>';
   }
+  function claudeStatus() {
+    if (!MV.claude) return 'nicht verfügbar';
+    var k = MV.claude.schluessel();
+    return !k.vorhanden ? 'fehlt' : k.ungueltig ? 'ungültig' : 'eingerichtet';
+  }
+  function kostenZeile(art, a) { return claudeAktiv() ? (firecrawlDa() ? 'ca. ' + kostenSchaetzung(art, a) + ' Punkte + ' : '') + MV.claude.kostenText : 'ca. ' + kostenSchaetzung(art, a) + ' Punkte'; }
+  function euro2(x) { return num(x) ? x.toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €' : KA; }
   function blattEinstellungen() {
-    var t = roh('theme') || 'auto', a = abflugListe(), schl = hatDaten() ? hatSchluessel() : null;
+    var t = roh('theme') || 'auto', a = abflugListe(), schl = hatDaten() ? hatSchluessel() : null, fcDa = schl && firecrawlDa();
     var h = '<fieldset class="abschnitt" style="border:0;padding:0;margin:0"><legend><h3>Darstellung</h3></legend><div class="wahl-gruppe" role="radiogroup" aria-label="Darstellung">' +
       [['auto', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']].map(function (x) { return '<label class="wahl"><input type="radio" name="thema" value="' + x[0] + '"' + (t === x[0] ? ' checked' : '') + '><span>' + x[1] + '</span></label>'; }).join('') + '</div></fieldset>' +
       '<div class="abschnitt"><label for="e-punkte"><h3>Amex-Punktestand</h3></label><input id="e-punkte" type="text" inputmode="numeric" autocomplete="off" placeholder="zum Beispiel 250.000" value="' + (punktestand() == null ? '' : NZ.format(punktestand())) + '" data-aktion-input="punkte"><p class="leise">Bleibt nur auf diesem Gerät.</p></div>' +
@@ -3225,15 +3598,17 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
       ALLE_ABFLUG.map(function (c) { return '<label><input type="checkbox" name="abflug" value="' + c + '"' + (a.indexOf(c) >= 0 ? ' checked' : '') + '><span>' + FLUGHAFEN[c] + ' (' + c + ')</span></label>'; }).join('') +
       '</div><p class="fehler" id="e-abflug" hidden>Mindestens einen Flughafen wählen.</p><p class="leise">Gilt ab der nächsten Suche. Jeder Flughafen kostet etwa 5 Punkte je Suche, weniger Flughäfen sparen Punkte.</p></fieldset>' +
       '<div class="abschnitt"><h3>Preisdienst</h3>' +
-      '<label class="schalter"><input type="checkbox" id="e-vergleich" role="switch"' + (vergleichAn() ? ' checked' : '') + '><span class="schalter-text">Portalvergleich (Agoda) – kostet 20–50 Punkte mehr</span><span class="schalter-bahn" aria-hidden="true"></span></label><div>' +
-      '<div class="status-zeile"><span>Firecrawl eingerichtet</span><strong>' + (schl === null ? 'nein (Beispielmodus)' : schl ? (S.zugangUngueltig ? 'ungültig' : 'ja') : 'nein') + '</strong></div>' +
-      '<div class="status-zeile"><span>Guthaben</span><strong id="e-guthaben">' + (schl && typeof MV.daten.guthaben === 'function' ? 'wird geladen …' : KA) + '</strong></div>' +
-      '<div class="status-zeile"><span>Kosten der letzten Suche</span><strong>' + (S.erg && num(S.erg.kostenPunkte) && !S.demo ? zahl(S.erg.kostenPunkte) + ' Punkte' : 'noch keine Suche') + '</strong></div>' +
-      '<div class="status-zeile"><span>Geschätzte Kosten je Suche</span><strong id="e-kosten">ca. ' + kostenSchaetzung(((S.erg && S.erg.suche) || formLesen()).art, a) + ' Punkte</strong></div>' +
-      '</div>' + (schl === false ? '<p class="leise">Zum Einrichten den Einrichtungslink auf diesem Gerät öffnen.</p>' : '') +
+      (claudeAktiv() ? '' : '<label class="schalter"><input type="checkbox" id="e-vergleich" role="switch"' + (vergleichAn() ? ' checked' : '') + '><span class="schalter-text">Portalvergleich (Agoda) – kostet 20–50 Punkte mehr</span><span class="schalter-bahn" aria-hidden="true"></span></label>') + '<div>' +
+      '<div class="status-zeile"><span>Claude (Unterkünfte)</span><strong id="e-claude">' + claudeStatus() + '</strong></div>' +
+      (MV.claude ? '<button type="button" class="knopf-klein" data-aktion="claude-einfuegen">Claude-Zugang einfügen</button><p class="leise" id="e-claude-info">Zugang (beginnt mit „sk-ant-“) vorher kopieren, dann tippen. Er bleibt nur auf diesem Gerät.</p>' : '') +
+      '<div class="status-zeile"><span>Firecrawl' + (claudeAktiv() ? ' (Flüge)' : '') + ' eingerichtet</span><strong>' + (schl === null ? 'nein (Beispielmodus)' : fcDa ? (S.zugangUngueltig ? 'ungültig' : 'ja') : 'nein') + '</strong></div>' +
+      '<div class="status-zeile"><span>Guthaben</span><strong id="e-guthaben">' + (fcDa && typeof MV.daten.guthaben === 'function' ? 'wird geladen …' : KA) + '</strong></div>' +
+      '<div class="status-zeile"><span>Kosten der letzten Suche</span><strong>' + (S.erg && !S.demo && S.erg.dienst === 'claude' ? (num(S.erg.kostenPunkte) ? zahl(S.erg.kostenPunkte) + ' Punkte + ' : '') + 'ca. ' + euro2(S.erg.kostenEuro) : S.erg && num(S.erg.kostenPunkte) && !S.demo ? zahl(S.erg.kostenPunkte) + ' Punkte' : 'noch keine Suche') + '</strong></div>' +
+      '<div class="status-zeile"><span>Geschätzte Kosten je Suche</span><strong id="e-kosten">' + kostenZeile(((S.erg && S.erg.suche) || formLesen()).art, a) + '</strong></div>' +
+      '</div>' + (!fcDa && schl !== null ? '<p class="leise">Für Flugpreise den Firecrawl-Einrichtungslink auf diesem Gerät öffnen.</p>' : '') +
       (hatDaten() && typeof MV.daten.cacheLeeren === 'function' ? '<button type="button" class="knopf-klein" data-aktion="cache-leeren">Zwischenspeicher leeren</button><p class="leise" id="e-cache" hidden>Zwischenspeicher geleert. Die nächste Suche holt alle Preise neu.</p>' : '') + '</div>';
     oeffneBlatt('Einstellungen', h);
-    if (schl && typeof MV.daten.guthaben === 'function') {
+    if (fcDa && typeof MV.daten.guthaben === 'function') {
       Promise.resolve().then(function () { return MV.daten.guthaben(); }).then(function (g) {
         var el = $('e-guthaben'); if (!el) return;
         el.textContent = g && num(g.rest) ? zahl(g.rest) + ' Punkte' + (num(g.plan) ? ' von ' + zahl(g.plan) : '') + (g.bis ? ', bis ' + (datumDE(g.bis) || g.bis) : '') : KA;
@@ -3308,8 +3683,20 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
       case 'lockern': lockern(w); break;
       case 'nur-fra': schreiben('abflug', ['FRA']); formAktualisieren(); break;
       case 'vergleich-aus': rohSetzen('vergleich', 'aus'); formAktualisieren(); break;
-      case 'zugang-uebernehmen': try { MV.daten.schluesselUebernehmen(); } catch (er) { console.error(er); } schliesseBlatt(); break;
-      case 'zugang-verwerfen': try { MV.daten.schluesselVerwerfen(); } catch (er) { console.error(er); } schliesseBlatt(); break;
+      case 'zugang-uebernehmen': try { if (MV.claude && MV.claude.einrichtungOffen) MV.claude.uebernehmen(); else MV.daten.schluesselUebernehmen(); } catch (er) { console.error(er); } schliesseBlatt(); break;
+      case 'zugang-verwerfen': try { if (MV.claude && MV.claude.einrichtungOffen) MV.claude.verwerfen(); else MV.daten.schluesselVerwerfen(); } catch (er) { console.error(er); } schliesseBlatt(); break;
+      case 'claude-einfuegen':
+        if (!MV.claude) break;
+        t.disabled = true;
+        MV.claude.einfuegen().then(function (r) {
+          t.disabled = false;
+          var info = $('e-claude-info') || $('einrichten-claude-info'), st = $('e-claude');
+          if (st) st.textContent = claudeStatus();
+          if (info) { info.textContent = r.ok ? 'Claude-Zugang gespeichert. Unterkünfte kommen ab jetzt über Claude.' : r.grund; info.setAttribute('role', 'status'); }
+          if (!info && !r.ok) ansage(r.grund);
+          if (r.ok) formAktualisieren();
+        });
+        break;
       case 'cache-leeren': try { MV.daten.cacheLeeren(); } catch (er) { console.error(er); } rohSetzen('letztes', null); if ($('e-cache')) $('e-cache').hidden = false; break;
       case 'kopieren':
         var fertigText = function (ok) { t.textContent = ok ? 'Kopiert ✓' : 'Bitte von Hand markieren'; setTimeout(function () { t.textContent = 'Suchtext kopieren'; }, 2500); };
@@ -3326,7 +3713,7 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
   d.addEventListener('change', function (e) {
     var t = e.target;
     if (t.name === 'thema') themaSetzen(t.value);
-    if (t.id === 'e-vergleich') { rohSetzen('vergleich', t.checked ? null : 'aus'); formAktualisieren(); var ks = $('e-kosten'); if (ks) ks.textContent = 'ca. ' + kostenSchaetzung(((S.erg && S.erg.suche) || formLesen()).art) + ' Punkte'; }
+    if (t.id === 'e-vergleich') { rohSetzen('vergleich', t.checked ? null : 'aus'); formAktualisieren(); var ks = $('e-kosten'); if (ks) ks.textContent = kostenZeile(((S.erg && S.erg.suche) || formLesen()).art, abflugListe()); }
     if (t.name === 'abflug') {
       var a = [].map.call(d.querySelectorAll('input[name="abflug"]:checked'), function (c) { return c.value; });
       $('e-abflug').hidden = !!a.length;
@@ -3360,7 +3747,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
       '<button type="button" class="knopf-primaer gross" data-aktion="zugang-uebernehmen">Neuen Zugang übernehmen</button><button type="button" class="knopf-zweit" data-aktion="zugang-verwerfen">Bisherigen behalten</button>');
   }
   window.addEventListener('mv:schluessel', function (e) {
-    if (e.detail && e.detail.ungueltig) S.zugangUngueltig = true;
+    if (e.detail && e.detail.claude) { /* Claude führt seinen Status selbst (MV.claude.schluessel().ungueltig) */ }
+    else if (e.detail && e.detail.ungueltig) S.zugangUngueltig = true;
     else if (e.detail && e.detail.neu) S.zugangUngueltig = false;
     if (e.detail && e.detail.frage) { blattZugangFrage(); return; }
     if (e.detail && e.detail.vorhanden) {
@@ -3386,8 +3774,8 @@ window.MV_FASSUNG = "mv-2026-10-31-1521";
     }
     if (!hatSchluessel()) { einrichtenZeigen(true); return; }
     guthabenLaden();
-    if (MV.daten.einrichtungOffen && MV.daten.einrichtungOffen.neu) setTimeout(blattZugangFrage, 0);
-    if (MV.daten.eingerichtet) { var m = $('eingerichtet-hinweis'); if (m) { m.hidden = false; setTimeout(function () { m.hidden = true; }, 8000); } }
+    if ((MV.daten.einrichtungOffen && MV.daten.einrichtungOffen.neu) || (MV.claude && MV.claude.einrichtungOffen)) setTimeout(blattZugangFrage, 0);
+    if (MV.daten.eingerichtet || (MV.claude && MV.claude.eingerichtet)) { var m = $('eingerichtet-hinweis'); if (m) { m.hidden = false; setTimeout(function () { m.hidden = true; }, 8000); } }
     var l = lesen('letztes', null);
     if (l && l.pakete) { neuesErgebnis(verknuepfen(l), false); renderAlles(); }
   }
